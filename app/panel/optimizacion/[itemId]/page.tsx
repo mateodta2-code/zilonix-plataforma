@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { BotonLink } from "@/components/marco/Boton";
+import { Boton, BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { GraficaLineas } from "@/components/marco/GraficaLineas";
@@ -15,14 +15,14 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerConexionIA } from "@/lib/ia/conexion";
 import { proveedorGeneraImagenes } from "@/lib/ia/imagen";
 import { obtenerMiMembresia } from "@/lib/membresias";
-import { competenciaItemMl, leerItemEdicionMl, PATRON_ID_PRODUCTO_O_ITEM, promocionActivaMl, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
+import { calidadItemMl, competenciaItemMl, experienciaCompraItemMl, leerItemEdicionMl, localeExperienciaCompra, PATRON_ID_PRODUCTO_O_ITEM, promocionActivaMl, tieneAutomatizacionPrecioMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { linkPublicacion } from "@/lib/ml/permalink";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { formatearMoneda } from "@/lib/ml/sitios";
 import { costoFijoPorUnidad, diasInventario, participacion, porUnidad, precioMinimo, resumirPeriodo, serieDiaria, utilidadAcumulada, variacion, type ResumenPeriodo } from "@/lib/optimizacion/calculos";
 import { leerDatosDetalle, type DatosDetalle } from "@/lib/optimizacion/detalle";
-import { opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
+import { CLAVE_PERSONALIZADO, opcionesPeriodo, resolverPeriodoDetalle } from "@/lib/optimizacion/periodo";
 import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
@@ -32,6 +32,8 @@ import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "../page.module.css";
 import { BitacoraCambios } from "./BitacoraCambios";
+import { RecomendacionesMl } from "./RecomendacionesMl";
+import recomendacionesStyles from "./recomendaciones.module.css";
 import { EditarPublicacion, type DatosEdicion } from "./EditarPublicacion";
 import { DiagnosticoPublicacion } from "./DiagnosticoPublicacion";
 import { SkuCopiable } from "@/components/marco/SkuCopiable";
@@ -54,7 +56,7 @@ export default async function DetalleOptimizacionPage({
   searchParams,
 }: {
   params: { itemId: string };
-  searchParams?: { cuenta?: ParametroUrl; periodo?: ParametroUrl; costos?: ParametroUrl };
+  searchParams?: { cuenta?: ParametroUrl; periodo?: ParametroUrl; desde?: ParametroUrl; hasta?: ParametroUrl; costos?: ParametroUrl };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -79,7 +81,7 @@ export default async function DetalleOptimizacionPage({
   const itemId = typeof params.itemId === "string" ? params.itemId.toUpperCase() : "";
   const cuentaId = primero(searchParams?.cuenta) ?? "";
   const ahora = new Date();
-  const periodo = resolverPeriodoDetalle(primero(searchParams?.periodo), ahora);
+  const periodo = resolverPeriodoDetalle(primero(searchParams?.periodo), ahora, { desde: primero(searchParams?.desde), hasta: primero(searchParams?.hasta) });
   const porUnidadModo = primero(searchParams?.costos) === "unidad";
   const miMembresia = await obtenerMiMembresia(usuario.id, empresa.id);
   const conFinanzas = miMembresia ? tienePermiso(miMembresia.permisos, "finanzas", "consultar") : false;
@@ -157,14 +159,30 @@ export default async function DetalleOptimizacionPage({
   // Fase 3 — edición: datos frescos de ML (ventas, variantes, fotos,
   // automatización y precio para ganar) y la base del simulador con los
   // costos del período elegido. Solo para quien puede modificar.
+  // Lecturas de solo lectura de ML para «Recomendaciones» y para el
+  // simulador. La competencia se lee UNA vez y va a los dos lados. Cada
+  // lectura falla por separado (.catch -> null): el detalle nunca se cae.
+  let token: string | null = null;
+  try {
+    token = await obtenerAccessTokenVigente(empresa.id, cuenta.id);
+  } catch (error) {
+    console.warn(`[app/panel/optimizacion] token ${itemId}: ${error instanceof Error ? error.name : "error"}`);
+  }
+  const locale = localeExperienciaCompra(idioma);
+  const [calidad, experiencia, competencia] = token
+    ? await Promise.all([
+        calidadItemMl(datos.item.id, token).catch(() => null),
+        locale ? experienciaCompraItemMl(datos.item.id, token, locale).catch(() => null) : Promise.resolve(null),
+        datos.item.catalogo ? competenciaItemMl(datos.item.id, token, siteId).catch(() => null) : Promise.resolve(null),
+      ])
+    : [null, null, null];
+
   let edicion: DatosEdicion | null = null;
-  if (puedeEditar) {
+  if (puedeEditar && token) {
     try {
-      const token = await obtenerAccessTokenVigente(empresa.id, cuenta.id);
-      const [itemEdicion, automatizada, competencia, conexionIA, promocion] = await Promise.all([
+      const [itemEdicion, automatizada, conexionIA, promocion] = await Promise.all([
         leerItemEdicionMl(datos.item.id, token),
         tieneAutomatizacionPrecioMl(datos.item.id, token),
-        datos.item.catalogo ? competenciaItemMl(datos.item.id, token, siteId).catch(() => null) : Promise.resolve(null),
         obtenerConexionIA(empresa.id, "optimizacion").catch(() => null),
         promocionActivaMl(datos.item.id, token),
       ]);
@@ -203,6 +221,10 @@ export default async function DetalleOptimizacionPage({
     const q = new URLSearchParams({ cuenta: cuenta.id, periodo: cambios.periodo ?? periodo.clave });
     const costos = cambios.costos ?? (porUnidadModo ? "unidad" : "total");
     if (costos === "unidad") q.set("costos", "unidad");
+    if ((cambios.periodo ?? periodo.clave) === CLAVE_PERSONALIZADO) {
+      q.set("desde", periodo.desde);
+      q.set("hasta", periodo.hasta);
+    }
     return `/panel/optimizacion/${datos!.item.id}?${q.toString()}`;
   };
 
@@ -225,12 +247,31 @@ export default async function DetalleOptimizacionPage({
           </a>
         ) : null}
         <span className={styles.filtro} aria-label="Período">
-          {opcionesPeriodo(ahora).map((o) => (
+          {opcionesPeriodo(ahora)
+            .filter((o) => o.clave !== CLAVE_PERSONALIZADO)
+            .map((o) => (
             <Link key={o.clave} scroll={false} href={href({ periodo: o.clave })} aria-current={o.clave === periodo.clave ? "page" : undefined}>
               {o.rotulo}
             </Link>
           ))}
         </span>
+        <details open={periodo.clave === CLAVE_PERSONALIZADO}>
+          <summary className={styles.nota}>Personalizado</summary>
+          <form method="get" className={recomendacionesStyles.rango}>
+            <input type="hidden" name="cuenta" value={cuenta.id} />
+            <input type="hidden" name="periodo" value={CLAVE_PERSONALIZADO} />
+            {porUnidadModo ? <input type="hidden" name="costos" value="unidad" /> : null}
+            <label>
+              Desde <input type="date" name="desde" required min={restarDiasIso(hoyBogota(ahora), 149)} max={hoyBogota(ahora)} defaultValue={periodo.clave === CLAVE_PERSONALIZADO ? periodo.desde : undefined} />
+            </label>
+            <label>
+              Hasta <input type="date" name="hasta" required min={restarDiasIso(hoyBogota(ahora), 149)} max={hoyBogota(ahora)} defaultValue={periodo.clave === CLAVE_PERSONALIZADO ? periodo.hasta : undefined} />
+            </label>
+            <Boton type="submit" variante="secundario" chico>
+              Aplicar
+            </Boton>
+          </form>
+        </details>
         <p className={styles.nota}>{`Del ${periodo.desde} al ${periodo.hasta}, comparado con el ${periodo.anteriorDesde} al ${periodo.anteriorHasta}.`}</p>
       </div>
 
@@ -243,6 +284,15 @@ export default async function DetalleOptimizacionPage({
         <TarjetaKpi titulo="Compradores únicos" valor="—" detalle={["Seller no guarda quién compró."]} />
         <TarjetaKpi titulo="Conversión" valor={pct(actual.conversion)} variacion={cambio(variacion(actual.conversion, anterior.conversion))} detalle={["Ventas ÷ visitas."]} />
       </RejillaKpi>
+
+      <RecomendacionesMl
+        calidad={calidad}
+        experiencia={experiencia}
+        competencia={competencia}
+        competenciaAplica={datos.item.catalogo}
+        item={{ stock: datos.item.stock, estado: datos.item.estado }}
+        idioma={idioma}
+      />
 
       <Tarjeta className={styles.tarjeta}>
         <p className={styles.seccion}>Por día</p>
@@ -294,6 +344,7 @@ export default async function DetalleOptimizacionPage({
 
       {edicion ? (
         <Tarjeta className={styles.tarjeta}>
+          <span id="editar" />
           <p className={styles.seccion}>Editar en Mercado Libre</p>
           <EditarPublicacion datos={edicion} />
         </Tarjeta>

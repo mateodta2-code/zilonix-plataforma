@@ -2134,17 +2134,44 @@ export async function calidadItemMl(itemId: string, token: string): Promise<Cali
   return leerCalidadItem(resp.data);
 }
 
-export type CompetenciaItemMl = { estado: string | null; precioParaGanar: number | null };
+export type BoostCompetenciaMl = { id: string; estado: string; descripcion: string | null };
+
+export type CompetenciaItemMl = {
+  estado: string | null;
+  precioParaGanar: number | null;
+  // opportunity / boosted / not_boosted / not_apply, tal cual los da ML.
+  boosts: BoostCompetenciaMl[];
+  // Por qué no compite (campo `reason`), si ML lo trae.
+  motivo: string | null;
+};
+
+// Pura: lee la respuesta de price_to_win?version=v2 sin inventar nada.
+export function leerCompetenciaItem(data: unknown): CompetenciaItemMl {
+  const d = (data ?? {}) as { status?: unknown; price_to_win?: unknown; boosts?: unknown; reason?: unknown };
+  const boosts: BoostCompetenciaMl[] = [];
+  for (const fila of Array.isArray(d.boosts) ? d.boosts : []) {
+    const b = fila as { id?: unknown; status?: unknown; description?: unknown };
+    if (typeof b?.id !== "string" || typeof b?.status !== "string") continue;
+    boosts.push({ id: b.id, estado: b.status, descripcion: typeof b.description === "string" && b.description.trim() ? b.description.trim() : null });
+  }
+  const motivo = Array.isArray(d.reason) ? d.reason.find((r) => typeof r === "string") : d.reason;
+  return {
+    estado: typeof d.status === "string" ? d.status : null,
+    precioParaGanar: numeroONull(d.price_to_win),
+    boosts,
+    motivo: typeof motivo === "string" && motivo.trim() ? motivo.trim() : null,
+  };
+}
 
 // Solo tiene sentido para publicaciones de catálogo.
 export async function competenciaItemMl(itemId: string, token: string, siteId: string): Promise<CompetenciaItemMl | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
   exigirId(siteId, /^[A-Z]{3}$/, "siteId");
-  const resp = await pedirLecturaMl<{ status?: unknown; price_to_win?: unknown }>(`/items/${itemId}/price_to_win`, token, {
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}/price_to_win`, token, {
     query: `?siteId=${siteId}&version=v2`,
   });
   if (!resp.ok) return null;
-  return { estado: typeof resp.data.status === "string" ? resp.data.status : null, precioParaGanar: numeroONull(resp.data.price_to_win) };
+  return leerCompetenciaItem(resp.data);
 }
 
 // ---------- Optimización, Fase 2 (detalle de una publicación) ----------
@@ -2173,6 +2200,89 @@ export async function visitasPorDiaMl(itemId: string, token: string, ultimosDias
   const resp = await pedirLecturaMl<unknown>(`/items/${itemId}/visits/time_window`, token, { query: `?last=${dias}&unit=day` });
   if (!resp.ok) return null;
   return leerVisitasPorDia(resp.data);
+}
+
+// Experiencia de compra (documentada): GET /reputation/items/{id}/
+// purchase_experience/integrators?locale=xx_YY. El locale es obligatorio.
+const LOCALES_EXPERIENCIA_COMPRA: ReadonlySet<string> = new Set(["es_MX", "es_UY", "es_CO", "es_CL", "es_AR", "es_PE", "pt_BR", "en_US"]);
+
+// "es-CO" (idioma de la cuenta) -> "es_CO"; null si ML no lo documenta.
+export function localeExperienciaCompra(idioma: unknown): string | null {
+  if (typeof idioma !== "string") return null;
+  const locale = idioma.replace("-", "_");
+  return LOCALES_EXPERIENCIA_COMPRA.has(locale) ? locale : null;
+}
+
+export type ProblemaExperienciaMl = {
+  cantidad: number | null;
+  etiqueta: string | null;
+  motivo: string | null;
+  detalle: string | null;
+  solucion: string | null;
+};
+
+export type ExperienciaCompraMl = {
+  color: string | null;
+  texto: string | null;
+  valor: number | null;
+  titulo: string | null;
+  subtitulos: string[];
+  problemas: ProblemaExperienciaMl[];
+  congelada: string | null;
+};
+
+// Reemplaza {0}, {1}... por sus placeholders; si no hay, los quita.
+function textoConPlaceholders(nodo: unknown): string | null {
+  const n = nodo as { text?: unknown; placeholders?: unknown } | null | undefined;
+  if (typeof n?.text !== "string") return null;
+  const marcadores = Array.isArray(n.placeholders) ? n.placeholders : [];
+  const texto = n.text
+    .replace(/\{(\d+)\}/g, (_, i: string) => {
+      const m = marcadores[Number(i)];
+      return typeof m === "string" || typeof m === "number" ? String(m) : "";
+    })
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return texto || null;
+}
+
+export function leerExperienciaCompra(data: unknown): ExperienciaCompraMl {
+  const d = (data ?? {}) as {
+    reputation?: { color?: unknown; text?: unknown; value?: unknown };
+    title?: unknown;
+    subtitles?: unknown;
+    metrics_details?: { problems?: unknown };
+    freeze?: unknown;
+  };
+  const problemas: ProblemaExperienciaMl[] = [];
+  for (const fila of Array.isArray(d.metrics_details?.problems) ? d.metrics_details!.problems : []) {
+    const p = fila as { quantity?: unknown; tag?: unknown; level_two?: { title?: unknown }; level_three?: { title?: unknown; remedy?: unknown } };
+    problemas.push({
+      cantidad: numeroONull(p?.quantity),
+      etiqueta: typeof p?.tag === "string" ? p.tag : null,
+      motivo: textoConPlaceholders(p?.level_two?.title),
+      detalle: textoConPlaceholders(p?.level_three?.title),
+      solucion: textoConPlaceholders(p?.level_three?.remedy),
+    });
+  }
+  return {
+    color: typeof d.reputation?.color === "string" ? d.reputation.color : null,
+    texto: typeof d.reputation?.text === "string" ? d.reputation.text : null,
+    valor: numeroONull(d.reputation?.value),
+    titulo: textoConPlaceholders(d.title),
+    subtitulos: (Array.isArray(d.subtitles) ? d.subtitles : []).map(textoConPlaceholders).filter((t): t is string => t !== null),
+    problemas,
+    congelada: textoConPlaceholders(d.freeze),
+  };
+}
+
+// 404/400 (sin datos de experiencia para esa publicación) -> null.
+export async function experienciaCompraItemMl(itemId: string, token: string, locale: string): Promise<ExperienciaCompraMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  if (!LOCALES_EXPERIENCIA_COMPRA.has(locale)) return null;
+  const resp = await pedirLecturaMl<unknown>(`/reputation/items/${itemId}/purchase_experience/integrators`, token, { query: `?locale=${locale}` });
+  if (!resp.ok) return null;
+  return leerExperienciaCompra(resp.data);
 }
 
 // ---------- Optimización, Fase 3 (editar desde Seller) ----------

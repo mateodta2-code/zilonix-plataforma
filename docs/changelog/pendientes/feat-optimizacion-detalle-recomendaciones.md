@@ -1,0 +1,2 @@
+- Optimización, detalle de una publicación: nuevo bloque «Recomendaciones de Mercado Libre» (calidad, experiencia de compra y competencia, con la lista de recomendaciones de ML y «Agrega más stock» con stock ≤ 3). Solo lectura; si ML no responde una fila, solo esa lo dice.
+- El selector de período del detalle suma «Hoy» y «Personalizado» (`?desde=&hasta=`, hasta 150 días atrás); fechas inválidas caen a los últimos 30 días.

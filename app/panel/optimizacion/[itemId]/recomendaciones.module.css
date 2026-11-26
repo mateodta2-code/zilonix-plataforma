@@ -1,0 +1,86 @@
+.filas {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.fila {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+}
+
+.filaTitulo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.valor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.nota {
+  margin: 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lista {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.lista a {
+  color: var(--acento-fuerte);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.notaVacia {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.rango {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.rango input[type="date"] {
+  padding: 4px 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  font: inherit;
+}
