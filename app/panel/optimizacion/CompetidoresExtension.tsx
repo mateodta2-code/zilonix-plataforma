@@ -14,6 +14,7 @@ import {
   textoRazonCompetidores,
   type CompetidorExtension,
 } from "@/lib/optimizacion/competidoresExtension";
+import { competidoresGuardadosAction, guardarCompetidoresAction } from "./actions";
 import styles from "./page.module.css";
 
 export type PropiaCompetidores = {
@@ -29,10 +30,6 @@ export type PropiaCompetidores = {
 
 type Guardado = { ts: number; termino: string; candidatos: number; competidores: CompetidorExtension[] };
 
-// La búsqueda tarda (listado + 10 fichas): se guarda 1 hora en este
-// navegador para no repetirla al cerrar y abrir la fila. Mismo criterio
-// que los bloques de Investigación (lib/ml/listadoCliente.ts).
-const TTL_MS = 60 * 60 * 1000;
 // Tope del lado de la página por si la extensión nunca contesta
 // (Service Worker reciclado): 20 s de listado + 10 × (15 s + pausa).
 const ESPERA_MAXIMA_MS = 4 * 60 * 1000;
@@ -51,35 +48,6 @@ const ENCABEZADOS = [
   { clave: "facturacion", contenido: "Facturación/mes aprox.", numerica: true },
 ];
 
-function clave(itemId: string) {
-  return `zx-optimizacion-competidores:${itemId}`;
-}
-
-function leerGuardado(itemId: string): Guardado | null {
-  try {
-    const crudo = window.localStorage.getItem(clave(itemId));
-    if (!crudo) return null;
-    const g = JSON.parse(crudo) as Guardado;
-    if (typeof g?.ts !== "number" || Date.now() - g.ts > TTL_MS || !Array.isArray(g.competidores)) return null;
-    // Se vuelve a validar como si llegara de la extensión.
-    const revalidado = leerMensajeCompetidores(
-      { fuente: "zilonix-extension", tipo: "competidores-leidos", payload: { excluirItemId: itemId, termino: g.termino, candidatos: g.candidatos, competidores: g.competidores } },
-      itemId
-    );
-    return revalidado?.tipo === "ok" ? { ts: g.ts, termino: revalidado.termino, candidatos: revalidado.candidatos, competidores: revalidado.competidores } : null;
-  } catch {
-    return null;
-  }
-}
-
-function guardar(itemId: string, g: Guardado) {
-  try {
-    window.localStorage.setItem(clave(itemId), JSON.stringify(g));
-  } catch {
-    // Sin almacenamiento (modo privado): solo no se recuerda.
-  }
-}
-
 function siNo(valor: boolean | null): string {
   return valor === null ? "—" : valor ? "Sí" : "No";
 }
@@ -87,7 +55,8 @@ function siNo(valor: boolean | null): string {
 // Fuera del catálogo: la extensión busca el producto en Mercado Libre,
 // toma los 10 primeros resultados (sin esta publicación) y lee la ficha
 // de cada uno — lo mismo que su panel muestra al analizar un producto.
-export function CompetidoresExtension({ propia, siteId, idioma }: { propia: PropiaCompetidores; siteId: string; idioma: string }) {
+export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinPermisoMl = false }: { propia: PropiaCompetidores; cuentaMlId: string; siteId: string; idioma: string; sinPermisoMl?: boolean }) {
+  const motivo = sinPermisoMl ? "Mercado Libre no deja leer la competencia de esta publicación por API" : "Esta publicación no está en el catálogo de Mercado Libre";
   const [conExtension, setConExtension] = useState<boolean | null>(null);
   const [termino, setTermino] = useState(() => terminoDesdeTitulo(propia.titulo));
   const [buscando, setBuscando] = useState(false);
@@ -96,8 +65,19 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
 
   useEffect(() => {
     setConExtension(document.documentElement.getAttribute("data-zilonix-extension") === "1");
-    setResultado(leerGuardado(propia.itemId));
-  }, [propia.itemId]);
+    // Lo último que se leyó queda guardado en Zilonix, no en este navegador.
+    let vigente = true;
+    competidoresGuardadosAction({ cuentaMlId, itemId: propia.itemId }).then(
+      (r) => {
+        if (!vigente) return;
+        if (r.ok && r.guardado) setResultado({ ts: Date.parse(r.guardado.leidoTs), termino: r.guardado.termino, candidatos: r.guardado.candidatos, competidores: r.guardado.competidores });
+      },
+      () => undefined
+    );
+    return () => {
+      vigente = false;
+    };
+  }, [cuentaMlId, propia.itemId]);
 
   useEffect(() => {
     if (!buscando) return;
@@ -112,7 +92,12 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
       }
       const nuevo = { ts: Date.now(), termino: m.termino, candidatos: m.candidatos, competidores: m.competidores };
       setResultado(nuevo);
-      guardar(propia.itemId, nuevo);
+      guardarCompetidoresAction({ cuentaMlId, itemId: propia.itemId, termino: nuevo.termino, candidatos: nuevo.candidatos, competidores: nuevo.competidores }).then(
+        (g) => {
+          if (!g.ok) setAviso(g.aviso);
+        },
+        () => setAviso("Se leyeron los competidores pero no se pudieron guardar. Intenta de nuevo.")
+      );
     }
     window.addEventListener("message", alMensaje);
     const tope = setTimeout(() => {
@@ -123,7 +108,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
       window.removeEventListener("message", alMensaje);
       clearTimeout(tope);
     };
-  }, [buscando, propia.itemId]);
+  }, [buscando, propia.itemId, cuentaMlId]);
 
   function buscar() {
     const limpio = termino.trim();
@@ -140,10 +125,10 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
   }
 
   if (conExtension === null) return null;
-  if (!conExtension) {
+  if (!conExtension && !resultado) {
     return (
       <p className={styles.nota}>
-        Esta publicación no está en el catálogo de Mercado Libre. Para compararla con otras del mismo producto, instala o actualiza la extensión de Zilonix (versión
+        {motivo}. Para compararla con otras del mismo producto, instala o actualiza la extensión de Zilonix (versión
         0.3.46 o más nueva) y recarga esta página.
       </p>
     );
@@ -157,7 +142,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
   return (
     <div className={styles.desglose}>
       <p className={styles.nota}>
-        No está en el catálogo. La extensión busca el producto en Mercado Libre, toma los 10 primeros resultados y lee la ficha de cada uno. Se abre una pestaña
+        {sinPermisoMl ? "Mercado Libre no deja leer la competencia por API." : "No está en el catálogo."} La extensión busca el producto en Mercado Libre, toma los 10 primeros resultados y lee la ficha de cada uno. Se abre una pestaña
         que se cierra sola al terminar (tarda 1 a 2 minutos).
       </p>
       <form
@@ -177,7 +162,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
           aria-label="Qué buscar en Mercado Libre"
           disabled={buscando}
         />
-        <Boton type="submit" disabled={buscando}>
+        <Boton type="submit" disabled={buscando || !conExtension}>
           {buscando ? "Buscando…" : resultado ? "Buscar de nuevo" : "Buscar 10 competidores"}
         </Boton>
       </form>
@@ -268,6 +253,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
               ))}
             </Tabla>
             <p className={styles.notaNeutra}>
+              {resultado.ts ? `Última lectura: ${new Date(resultado.ts).toLocaleString(idioma || "es", { dateStyle: "medium", timeStyle: "short" })}. Queda guardada para darle seguimiento. ` : ""}
               {`${competidores.length} publicaciones de la búsqueda «${resultado.termino}», en el orden de Mercado Libre. "—" = la ficha no lo mostró. "+N" = Mercado Libre solo muestra el rango. Ventas/mes y facturación son aproximados, igual que en la extensión: nunca un dato que Mercado Libre confirme.`}
             </p>
           </>
