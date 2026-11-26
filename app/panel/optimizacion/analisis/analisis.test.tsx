@@ -9,7 +9,6 @@ import { TablaCambiosPublicacion } from "./TablaCambiosPublicacion";
 
 const visitasMock = vi.fn();
 vi.mock("./actions", () => ({
-  PUBLICACIONES_POR_TANDA: 3,
   visitasPublicacionesAnalisisAction: (...a: unknown[]) => visitasMock(...a),
 }));
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));

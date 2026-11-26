@@ -5,6 +5,7 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { MAXIMO_DIAS_VISITAS, PATRON_ID_PRODUCTO_O_ITEM, visitasPorDiaMl } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
 import { recortarPeriodo, sumarVisitas, ultimosDiasParaVisitas } from "@/lib/optimizacion/analisisDatos";
+import { PUBLICACIONES_POR_TANDA } from "@/lib/optimizacion/atribucion";
 import { leerPeriodoLista } from "@/lib/optimizacion/periodoLista";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { hoyBogota } from "@/lib/publicidad/plan";
@@ -13,8 +14,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 // Visitas de unas pocas publicaciones en los dos períodos (solo GET a
 // Mercado Libre, /items/{id}/visits/time_window: una llamada por publicación
 // cubre los dos períodos). El cliente la llama en tandas de 3: el tope por
-// llamada es lo que limita el paralelismo contra Mercado Libre.
-export const PUBLICACIONES_POR_TANDA = 3;
+// llamada (PUBLICACIONES_POR_TANDA) es lo que limita el paralelismo contra Mercado Libre.
 
 export type VisitasPublicacion = { actual: number; anterior: number } | null;
 

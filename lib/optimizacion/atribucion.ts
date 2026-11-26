@@ -42,6 +42,8 @@ export type Atribucion = {
 
 export const MINIMO_VENTAS_MUESTRA = 3;
 export const MINIMO_VISITAS_MUESTRA = 50;
+// Publicaciones por llamada a ML (vive aquí: un archivo "use server" solo puede exportar funciones async).
+export const PUBLICACIONES_POR_TANDA = 3;
 export const ETIQUETA_POCAS_VENTAS = "Pocas ventas para concluir";
 
 const CERO = BigInt(0);

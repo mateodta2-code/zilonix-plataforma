@@ -5,10 +5,10 @@ import { useEffect, useState } from "react";
 import { BarraCarga } from "@/components/marco/BarraCarga";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { formatearMoneda } from "@/lib/ml/sitios";
-import { atribuir, etiquetaCambio, ETIQUETA_POCAS_VENTAS, muestraSuficiente, type Aportes } from "@/lib/optimizacion/atribucion";
+import { atribuir, etiquetaCambio, ETIQUETA_POCAS_VENTAS, muestraSuficiente, PUBLICACIONES_POR_TANDA, type Aportes } from "@/lib/optimizacion/atribucion";
 import type { CambioPublicacion } from "@/lib/optimizacion/analisisDatos";
 import { plataConSigno } from "./AtribucionIngresos";
-import { PUBLICACIONES_POR_TANDA, visitasPublicacionesAnalisisAction, type VisitasPublicacion } from "./actions";
+import { visitasPublicacionesAnalisisAction, type VisitasPublicacion } from "./actions";
 import styles from "./analisis.module.css";
 
 type EntradaPeriodo = { dias?: string; periodo?: string; desde?: string; hasta?: string };
