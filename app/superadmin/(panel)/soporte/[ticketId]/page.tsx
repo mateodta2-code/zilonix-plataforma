@@ -29,7 +29,7 @@ export default async function TicketSuperadminPage({ params }: { params: { ticke
 
       <Tarjeta>
         <p className={styles.cuerpo}>{ticket.mensaje}</p>
-        <CapturasTicket base="/api/superadmin/soporte/imagen" ticketId={ticket.id} archivos={ticket.imagenes} />
+        <CapturasTicket base="/superadmin/soporte-imagen" ticketId={ticket.id} archivos={ticket.imagenes} />
       </Tarjeta>
 
       {ticket.mensajes.length > 0 && (
@@ -43,7 +43,7 @@ export default async function TicketSuperadminPage({ params }: { params: { ticke
                     {m.esSuperadmin ? `Soporte Zilonix (${m.autorNombre})` : m.autorNombre} · {formatoFechaTicket(m.creadoTs)}
                   </span>
                   <p className={styles.cuerpo}>{m.mensaje}</p>
-                  <CapturasTicket base="/api/superadmin/soporte/imagen" ticketId={ticket.id} archivos={m.imagenes} />
+                  <CapturasTicket base="/superadmin/soporte-imagen" ticketId={ticket.id} archivos={m.imagenes} />
                 </div>
               </FilaLista>
             ))}

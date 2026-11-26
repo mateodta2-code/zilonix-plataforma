@@ -290,7 +290,7 @@ const RUTAS_SUPERADMIN = new Set([
   "app/superadmin/(panel)/procesos/page.tsx",
   "app/superadmin/(panel)/anuncios/page.tsx",
   "app/superadmin/(panel)/anuncios/actions.ts",
-  "app/api/superadmin/soporte/imagen/[ticketId]/[archivo]/route.ts",
+  "app/superadmin/soporte-imagen/[ticketId]/[archivo]/route.ts",
   "app/superadmin/(panel)/empresas/page.tsx",
   "app/superadmin/(panel)/equipo/page.tsx",
   "app/superadmin/(panel)/auditoria/page.tsx",
