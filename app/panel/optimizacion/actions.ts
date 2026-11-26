@@ -22,6 +22,7 @@ import {
   leerItemEdicionMl,
   LimiteMercadoLibreError,
   localeExperienciaCompra,
+  MlSinPermisoAppError,
   motivoErrorEscrituraMl,
   detalleErrorEscrituraMl,
   PATRON_ID_PRODUCTO_O_ITEM,
@@ -205,7 +206,8 @@ export async function metricasPublicacionesAction(entrada: {
 }
 
 export type ResultadoCompetencia =
-  | { ok: true; catalogo: false }
+  // sinPermisoMl: Mercado Libre le niega a la app leer la competencia por API; se compara con la extensión.
+  | { ok: true; catalogo: false; sinPermisoMl?: true }
   | { ok: true; catalogo: true; propia: FilaComparacion; competidores: FilaComparacion[]; total: number; alertas: string[] }
   | { ok: false; aviso: string };
 
@@ -276,6 +278,9 @@ export async function competenciaPublicacionAction(entrada: { cuentaMlId: string
     const competidores = elegidas.map(completar);
     return { ok: true, catalogo: true, propia, competidores, total: ofertas.length - (propiaOferta ? 1 : 0), alertas: alertasComparacion(propia, competidores) };
   } catch (error) {
+    // Sin permiso de la app para leer la competencia: no es un callejón sin salida,
+    // la extensión la lee desde la ficha pública.
+    if (error instanceof MlSinPermisoAppError) return { ok: true, catalogo: false, sinPermisoMl: true };
     console.warn(`[app/panel/optimizacion] competencia ${entrada.itemId}: ${error instanceof Error ? error.name : "error"}`);
     return { ok: false, aviso: motivoCuentaSinRevisar(error) };
   }

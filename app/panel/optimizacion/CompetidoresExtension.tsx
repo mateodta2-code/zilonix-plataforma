@@ -87,7 +87,8 @@ function siNo(valor: boolean | null): string {
 // Fuera del catálogo: la extensión busca el producto en Mercado Libre,
 // toma los 10 primeros resultados (sin esta publicación) y lee la ficha
 // de cada uno — lo mismo que su panel muestra al analizar un producto.
-export function CompetidoresExtension({ propia, siteId, idioma }: { propia: PropiaCompetidores; siteId: string; idioma: string }) {
+export function CompetidoresExtension({ propia, siteId, idioma, sinPermisoMl = false }: { propia: PropiaCompetidores; siteId: string; idioma: string; sinPermisoMl?: boolean }) {
+  const motivo = sinPermisoMl ? "Mercado Libre no deja leer la competencia de esta publicación por API" : "Esta publicación no está en el catálogo de Mercado Libre";
   const [conExtension, setConExtension] = useState<boolean | null>(null);
   const [termino, setTermino] = useState(() => terminoDesdeTitulo(propia.titulo));
   const [buscando, setBuscando] = useState(false);
@@ -143,7 +144,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
   if (!conExtension) {
     return (
       <p className={styles.nota}>
-        Esta publicación no está en el catálogo de Mercado Libre. Para compararla con otras del mismo producto, instala o actualiza la extensión de Zilonix (versión
+        {motivo}. Para compararla con otras del mismo producto, instala o actualiza la extensión de Zilonix (versión
         0.3.46 o más nueva) y recarga esta página.
       </p>
     );
@@ -157,7 +158,7 @@ export function CompetidoresExtension({ propia, siteId, idioma }: { propia: Prop
   return (
     <div className={styles.desglose}>
       <p className={styles.nota}>
-        No está en el catálogo. La extensión busca el producto en Mercado Libre, toma los 10 primeros resultados y lee la ficha de cada uno. Se abre una pestaña
+        {sinPermisoMl ? "Mercado Libre no deja leer la competencia por API." : "No está en el catálogo."} La extensión busca el producto en Mercado Libre, toma los 10 primeros resultados y lee la ficha de cada uno. Se abre una pestaña
         que se cierra sola al terminar (tarda 1 a 2 minutos).
       </p>
       <form
