@@ -284,6 +284,7 @@ export default async function OptimizacionPage({
               filas={datos.filas.map((f) => ({ id: f.id, titulo: f.titulo }))}
               referencias={datos.alerta.referencias}
               estados={datos.alerta.estados}
+              pendientes={datos.alerta.pendientes}
             />
           ) : null}
           {datos.filas.length === 0 ? (
