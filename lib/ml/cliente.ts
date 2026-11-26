@@ -2412,6 +2412,32 @@ export async function tieneAutomatizacionPrecioMl(itemId: string, token: string)
   }
 }
 
+// Categoría de cada publicación (Optimización · Rendimiento: la mediana de
+// CTR y conversión se calcula por categoría). Multiget documentado:
+// GET /items?ids=…&attributes=id,category_id, en lotes de 20. Un lote que
+// falla no tumba los demás: sus publicaciones simplemente no salen en el
+// mapa (el llamador las trata como «sin categoría»).
+export async function categoriasItemsMl(ids: string[], token: string): Promise<Map<string, string>> {
+  const validos = [...new Set(ids.filter((id) => PATRON_ID_PRODUCTO_O_ITEM.test(id)))];
+  const categorias = new Map<string, string>();
+  for (let i = 0; i < validos.length; i += TAMAÑO_LOTE_DETALLE_ITEMS) {
+    const lote = validos.slice(i, i + TAMAÑO_LOTE_DETALLE_ITEMS);
+    try {
+      const resp = await pedirLecturaMl<{ code?: unknown; body?: { id?: unknown; category_id?: unknown } }[]>("/items", token, {
+        query: `?ids=${lote.join(",")}&attributes=id,category_id`,
+      });
+      for (const fila of resp.ok && Array.isArray(resp.data) ? resp.data : []) {
+        const id = fila?.body?.id;
+        const categoria = fila?.body?.category_id;
+        if (fila?.code === 200 && typeof id === "string" && typeof categoria === "string" && categoria) categorias.set(id, categoria);
+      }
+    } catch (error) {
+      if (!(error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError)) throw error;
+    }
+  }
+  return categorias;
+}
+
 // ---------- Optimización, Fase 4 (competidores del mismo producto) ----------
 // Confirmado en staging (18-nov, PR #466/#467):
 // - /products/{id}/items: los vendedores del producto de catálogo, con
