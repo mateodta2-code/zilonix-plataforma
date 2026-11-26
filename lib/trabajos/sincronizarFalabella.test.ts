@@ -18,7 +18,7 @@ vi.mock("@/lib/falabella/pedidos", () => ({ importarPedidos: vi.fn() }));
 
 import { registrarAuditoria } from "@/lib/auditoria";
 import { importarPedidos } from "@/lib/falabella/pedidos";
-import { errorSeguro, sincronizarFalabellaProgramada } from "./sincronizarFalabella";
+import { PRESUPUESTO_CORRIDA_MS, errorSeguro, sincronizarFalabellaProgramada } from "./sincronizarFalabella";
 
 const EMPRESA_A = "11111111-1111-4111-8111-111111111111";
 const EMPRESA_B = "22222222-2222-4222-8222-222222222222";
@@ -79,6 +79,29 @@ describe("sincronizarFalabellaProgramada (issue #422)", () => {
     const resumen = await sincronizarFalabellaProgramada();
 
     expect(resumen).toMatchObject({ revisadas: 3, correctas: 2, fallidas: 1 });
+  });
+
+  it("si se agota el presupuesto de tiempo, se detiene y devuelve sigue: true sin error", async () => {
+    vi.mocked(importarPedidos).mockResolvedValue({ importados: 1, truncado: false });
+    let t = 0;
+    // La 1.ª lectura fija el límite; la cuenta 1 entra a t=0 y la 2 ya pasa de 240 s.
+    const reloj = vi.fn(() => {
+      const actual = t;
+      if (t === 0 && reloj.mock.calls.length >= 2) t = PRESUPUESTO_CORRIDA_MS;
+      return actual;
+    });
+
+    const resumen = await sincronizarFalabellaProgramada(new Date("2026-11-24T15:00:00.000Z"), reloj);
+
+    expect(importarPedidos).toHaveBeenCalledTimes(1);
+    expect(resumen).toMatchObject({ revisadas: 1, correctas: 1, fallidas: 0, sigue: true });
+    expect(registrarAuditoria).not.toHaveBeenCalled();
+  });
+
+  it("sin agotar el tiempo devuelve sigue: false", async () => {
+    vi.mocked(importarPedidos).mockResolvedValue({ importados: 0, truncado: false });
+    const resumen = await sincronizarFalabellaProgramada();
+    expect(resumen.sigue).toBe(false);
   });
 
   it("errorSeguro quita URLs, correos y firmas", () => {

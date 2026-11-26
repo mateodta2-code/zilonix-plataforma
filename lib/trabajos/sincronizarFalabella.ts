@@ -21,6 +21,11 @@ import { importarPedidos } from "@/lib/falabella/pedidos";
 export const DIAS_HACIA_ATRAS = 3;
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
+// Presupuesto de la corrida entera, igual que Publicidad: el workflow corta
+// la petición a los 300 s, así que se frena antes y se avisa con `sigue`
+// (no es un error; las cuentas pendientes entran en la próxima corrida).
+export const PRESUPUESTO_CORRIDA_MS = 240_000;
+
 export type ResultadoCuentaFalabella =
   | { cuentaId: string; ok: true; importados: number; truncado: boolean }
   | { cuentaId: string; ok: false; error: string };
@@ -30,6 +35,8 @@ export type ResumenSincronizacionFalabella = {
   revisadas: number;
   correctas: number;
   fallidas: number;
+  // true si se agotó el tiempo antes de revisar todas las cuentas.
+  sigue: boolean;
   cuentas: ResultadoCuentaFalabella[];
 };
 
@@ -45,7 +52,11 @@ export function errorSeguro(error: unknown): string {
     .slice(0, 180);
 }
 
-export async function sincronizarFalabellaProgramada(ahora: Date = new Date()): Promise<ResumenSincronizacionFalabella> {
+export async function sincronizarFalabellaProgramada(
+  ahora: Date = new Date(),
+  reloj: () => number = Date.now
+): Promise<ResumenSincronizacionFalabella> {
+  const limite = reloj() + PRESUPUESTO_CORRIDA_MS;
   const desde = new Date(ahora.getTime() - DIAS_HACIA_ATRAS * MS_POR_DIA);
 
   const cuentas = await dbTrabajadorFalabella
@@ -55,7 +66,12 @@ export async function sincronizarFalabellaProgramada(ahora: Date = new Date()): 
     .orderBy(asc(cuentasFalabella.id));
 
   const resultados: ResultadoCuentaFalabella[] = [];
+  let sigue = false;
   for (const cuenta of cuentas) {
+    if (reloj() >= limite) {
+      sigue = true;
+      break;
+    }
     try {
       const { importados, truncado } = await importarPedidos(cuenta.empresaId, cuenta.id, desde);
       resultados.push({ cuentaId: cuenta.id, ok: true, importados, truncado });
@@ -87,6 +103,7 @@ export async function sincronizarFalabellaProgramada(ahora: Date = new Date()): 
     revisadas: resultados.length,
     correctas,
     fallidas: resultados.length - correctas,
+    sigue,
     cuentas: resultados,
   };
 }

@@ -1,0 +1,1 @@
+- **2026-11-26** — Refs #422: la sincronización automática de pedidos de Falabella ahora tiene un presupuesto de 240 s por corrida (igual que Publicidad); si no alcanza a revisar todas las cuentas se detiene y devuelve `sigue: true`, sin marcarlo como error. Sin migración.

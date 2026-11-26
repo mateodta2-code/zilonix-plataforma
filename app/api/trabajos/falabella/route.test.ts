@@ -71,6 +71,7 @@ describe("POST /api/trabajos/falabella (issue #422)", () => {
       revisadas: 2,
       correctas: 1,
       fallidas: 1,
+      sigue: false,
       cuentas: [
         { cuentaId: "c1", ok: true as const, importados: 4, truncado: false },
         { cuentaId: "c2", ok: false as const, error: "Error" },
