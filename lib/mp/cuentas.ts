@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { cuentasMp } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
@@ -126,48 +126,87 @@ export async function listarCuentasMpConectadas(empresaId: string) {
   );
 }
 
+// Solo las cuentas activas (sin desconectada_ts). listarCuentasMpConectadas
+// sigue devolviendo también las desconectadas porque /panel/conectar-ml
+// las muestra con el chip «Desconectada».
+export async function listarCuentasMpActivas(empresaId: string) {
+  return dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({
+        id: cuentasMp.id,
+        cuentaIdExterna: cuentasMp.cuentaIdExterna,
+        nickname: cuentasMp.nickname,
+      })
+      .from(cuentasMp)
+      .where(and(eq(cuentasMp.empresaId, empresaId), isNull(cuentasMp.desconectadaTs)))
+      .orderBy(asc(cuentasMp.creadoTs))
+  );
+}
+
+type PasoToken = { tipo: "vigente"; accessToken: string } | { tipo: "renovar"; refreshToken: string; candado: Date };
+
 // Devuelve un access_token vigente, renovando primero si ya venció o
-// está por vencer (120s de margen). Candado con UPDATE atómico sobre
-// renovando_ts — mismo criterio que obtenerAccessTokenVigente de ML.
+// está por vencer (120s de margen).
+//
+// Bloque 2 — renovación concurrente: Mercado Pago rota el refresh_token
+// en cada renovación, así que dos procesos renovando a la vez dejaban
+// uno con un refresh_token ya usado. Ahora:
+//   1. Transacción corta con SELECT ... FOR UPDATE: un segundo proceso
+//      espera el candado de fila y, al seguir, RELEE token_expira_ts,
+//      refresh_token y renovando_ts ya actualizados. Si otro proceso ya
+//      renovó, devuelve ese token fresco; si está renovando, lanza
+//      CandadoRenovacionMpError. Si no, marca renovando_ts y confirma.
+//   2. El fetch a Mercado Pago va FUERA de cualquier transacción.
+//   3. Transacción corta para guardar los tokens nuevos, solo si el
+//      candado sigue siendo el nuestro (una reconexión en el medio lo
+//      limpia y gana la reconexión).
+// empresa_id explícito en cada consulta, además de la RLS.
 export async function obtenerAccessTokenMpVigente(empresaId: string, cuentaId: string): Promise<string> {
-  return dbComoEmpresa(empresaId, async (tx) => {
-    const [cuenta] = await tx.select().from(cuentasMp).where(eq(cuentasMp.id, cuentaId));
+  const deEstaCuenta = and(eq(cuentasMp.id, cuentaId), eq(cuentasMp.empresaId, empresaId));
+
+  const paso = await dbComoEmpresa(empresaId, async (tx): Promise<PasoToken> => {
+    const [cuenta] = await tx.select().from(cuentasMp).where(deEstaCuenta).for("update");
     if (!cuenta) throw new CuentaMpNoEncontradaError();
     if (cuenta.desconectadaTs) throw new CuentaMpDesconectadaError();
 
     if (cuenta.tokenExpiraTs.getTime() > Date.now()) {
-      return descifrarToken(cuenta.accessTokenCifrado);
+      return { tipo: "vigente", accessToken: descifrarToken(cuenta.accessTokenCifrado) };
     }
 
-    const umbralCandadoCaido = new Date(Date.now() - CANDADO_ABANDONADO_MS);
-    const [candadoTomado] = await tx
-      .update(cuentasMp)
-      .set({ renovandoTs: new Date() })
-      .where(and(eq(cuentasMp.id, cuentaId), or(isNull(cuentasMp.renovandoTs), lt(cuentasMp.renovandoTs, umbralCandadoCaido))))
-      .returning({ id: cuentasMp.id });
+    const umbralCandadoCaido = Date.now() - CANDADO_ABANDONADO_MS;
+    if (cuenta.renovandoTs && cuenta.renovandoTs.getTime() >= umbralCandadoCaido) throw new CandadoRenovacionMpError();
 
-    if (!candadoTomado) throw new CandadoRenovacionMpError();
-
-    try {
-      const tokensNuevos = await renovarToken(descifrarToken(cuenta.refreshTokenCifrado));
-      await tx
-        .update(cuentasMp)
-        .set({
-          accessTokenCifrado: cifrarToken(tokensNuevos.accessToken),
-          refreshTokenCifrado: cifrarToken(tokensNuevos.refreshToken),
-          tokenExpiraTs: expiraTsDesdeAhora(tokensNuevos),
-          renovandoTs: null,
-        })
-        .where(eq(cuentasMp.id, cuentaId));
-      return tokensNuevos.accessToken;
-    } catch (error) {
-      await tx.update(cuentasMp).set({ renovandoTs: null }).where(eq(cuentasMp.id, cuentaId));
-      // Solo el nombre del error, nunca error.message (puede traer texto
-      // crudo de Mercado Pago, ver lib/mp/oauth.ts).
-      console.warn(`[lib/mp/cuentas] no se pudo renovar el token de la cuenta ${cuentaId}:`, error instanceof Error ? error.name : String(error));
-      throw new RenovacionTokenMpFallidaError();
-    }
+    const candado = new Date();
+    await tx.update(cuentasMp).set({ renovandoTs: candado }).where(deEstaCuenta);
+    return { tipo: "renovar", refreshToken: descifrarToken(cuenta.refreshTokenCifrado), candado };
   });
+
+  if (paso.tipo === "vigente") return paso.accessToken;
+
+  const conNuestroCandado = and(deEstaCuenta, eq(cuentasMp.renovandoTs, paso.candado));
+  let tokensNuevos: TokensMp;
+  try {
+    tokensNuevos = await renovarToken(paso.refreshToken);
+  } catch (error) {
+    await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMp).set({ renovandoTs: null }).where(conNuestroCandado));
+    // Solo el nombre del error, nunca error.message (puede traer texto
+    // crudo de Mercado Pago, ver lib/mp/oauth.ts).
+    console.warn(`[lib/mp/cuentas] no se pudo renovar el token de la cuenta ${cuentaId}:`, error instanceof Error ? error.name : String(error));
+    throw new RenovacionTokenMpFallidaError();
+  }
+
+  await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .update(cuentasMp)
+      .set({
+        accessTokenCifrado: cifrarToken(tokensNuevos.accessToken),
+        refreshTokenCifrado: cifrarToken(tokensNuevos.refreshToken),
+        tokenExpiraTs: expiraTsDesdeAhora(tokensNuevos),
+        renovandoTs: null,
+      })
+      .where(conNuestroCandado)
+  );
+  return tokensNuevos.accessToken;
 }
 
 // Desconectar nunca borra la fila — solo marca desconectada_ts — y deja
