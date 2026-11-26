@@ -76,6 +76,16 @@ describe("Accionables", () => {
     expect(sessionStorage.getItem("zx-accionables-descartados")).toContain("c1|portada|MCO4");
   });
 
+  it("«Ir a la publicación» lleva al bloque de edición del detalle, con cuenta y período", async () => {
+    contextoMock.mockResolvedValue({ ok: true, contexto: {}, avisos: [] });
+    senalesMock.mockResolvedValue({ ok: true, senales: {} });
+    render(<Accionables {...props()} />);
+    await act(async () => {});
+    const href = screen.getByText("Ir a la publicación").closest("a")?.getAttribute("href") ?? "";
+    expect(href).toMatch(/^\/panel\/optimizacion\/MCO4\?cuenta=c1/);
+    expect(href.endsWith("#editar")).toBe(true);
+  });
+
   it("marcar hecho guarda la nota «Accionable hecho: <tipo>» con la fecha de hoy", async () => {
     contextoMock.mockResolvedValue({ ok: true, contexto: {}, avisos: [] });
     senalesMock.mockResolvedValue({ ok: true, senales: {} });

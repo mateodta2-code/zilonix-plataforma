@@ -1,5 +1,5 @@
 {
-  "id": "b155d830-42ce-4074-b837-80e1ef657247",
+  "id": "c736e0a0-c4ba-4c97-8305-ec39d2afd16b",
   "prevId": "6db653d2-6a27-4f19-bef5-3174cf64ace7",
   "version": "7",
   "dialect": "postgresql",
@@ -720,20 +720,6 @@
           "notNull": true,
           "default": "'activa'"
         },
-        "origen": {
-          "name": "origen",
-          "type": "origen_bodega_3pl",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'superadmin'"
-        },
-        "creado_por": {
-          "name": "creado_por",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "creado_ts": {
           "name": "creado_ts",
           "type": "timestamp with time zone",
@@ -742,39 +728,8 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "bodegas_3pl_autorregistro_unica": {
-          "name": "bodegas_3pl_autorregistro_unica",
-          "columns": [
-            {
-              "expression": "creado_por",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"bodegas_3pl\".\"origen\" = 'autorregistro'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "bodegas_3pl_creado_por_usuarios_id_fk": {
-          "name": "bodegas_3pl_creado_por_usuarios_id_fk",
-          "tableFrom": "bodegas_3pl",
-          "tableTo": "usuarios",
-          "columnsFrom": [
-            "creado_por"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -5481,6 +5436,135 @@
       },
       "isRLSEnabled": false
     },
+    "public.optimizacion_competidores_ext": {
+      "name": "optimizacion_competidores_ext",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "empresa_id": {
+          "name": "empresa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cuenta_ml_id": {
+          "name": "cuenta_ml_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "termino": {
+          "name": "termino",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidatos": {
+          "name": "candidatos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "competidores": {
+          "name": "competidores",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "leido_ts": {
+          "name": "leido_ts",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "optimizacion_competidores_ext_empresa_id_empresas_id_fk": {
+          "name": "optimizacion_competidores_ext_empresa_id_empresas_id_fk",
+          "tableFrom": "optimizacion_competidores_ext",
+          "tableTo": "empresas",
+          "columnsFrom": [
+            "empresa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "optimizacion_competidores_ext_cuenta_ml_id_cuentas_ml_id_fk": {
+          "name": "optimizacion_competidores_ext_cuenta_ml_id_cuentas_ml_id_fk",
+          "tableFrom": "optimizacion_competidores_ext",
+          "tableTo": "cuentas_ml",
+          "columnsFrom": [
+            "cuenta_ml_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "optimizacion_competidores_ext_usuario_id_usuarios_id_fk": {
+          "name": "optimizacion_competidores_ext_usuario_id_usuarios_id_fk",
+          "tableFrom": "optimizacion_competidores_ext",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "optimizacion_competidores_ext_empresa_item_unico": {
+          "name": "optimizacion_competidores_ext_empresa_item_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "empresa_id",
+            "item_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "optimizacion_competidores_ext_item_valido": {
+          "name": "optimizacion_competidores_ext_item_valido",
+          "value": "\"optimizacion_competidores_ext\".\"item_id\" ~ '^[A-Z]{3}[0-9]{6,15}$'"
+        },
+        "optimizacion_competidores_ext_termino_largo": {
+          "name": "optimizacion_competidores_ext_termino_largo",
+          "value": "char_length(\"optimizacion_competidores_ext\".\"termino\") <= 120"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.optimizacion_notas": {
       "name": "optimizacion_notas",
       "schema": "",
@@ -7014,79 +7098,6 @@
           "value": "\"pedidos_finanzas\".\"envio_agencia_congelado\" >= 0"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.perfiles_domiciliario": {
-      "name": "perfiles_domiciliario",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "usuario_id": {
-          "name": "usuario_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nombre": {
-          "name": "nombre",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "telefono": {
-          "name": "telefono",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ciudad": {
-          "name": "ciudad",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "creado_ts": {
-          "name": "creado_ts",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "perfiles_domiciliario_usuario_id_usuarios_id_fk": {
-          "name": "perfiles_domiciliario_usuario_id_usuarios_id_fk",
-          "tableFrom": "perfiles_domiciliario",
-          "tableTo": "usuarios",
-          "columnsFrom": [
-            "usuario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "perfiles_domiciliario_usuario_id_unique": {
-          "name": "perfiles_domiciliario_usuario_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "usuario_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.permisos_rol": {
@@ -10231,100 +10242,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.sedes_bodega": {
-      "name": "sedes_bodega",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "bodega_id": {
-          "name": "bodega_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nombre": {
-          "name": "nombre",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "direccion": {
-          "name": "direccion",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ciudad": {
-          "name": "ciudad",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "activa": {
-          "name": "activa",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "creado_ts": {
-          "name": "creado_ts",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "sedes_bodega_bodega_nombre_unico": {
-          "name": "sedes_bodega_bodega_nombre_unico",
-          "columns": [
-            {
-              "expression": "bodega_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "nombre",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "sedes_bodega_bodega_id_bodegas_3pl_id_fk": {
-          "name": "sedes_bodega_bodega_id_bodegas_3pl_id_fk",
-          "tableFrom": "sedes_bodega",
-          "tableTo": "bodegas_3pl",
-          "columnsFrom": [
-            "bodega_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.seguimiento_alertas": {
       "name": "seguimiento_alertas",
       "schema": "",
@@ -12079,14 +11996,6 @@
         "cross_docking",
         "fulfillment",
         "otro"
-      ]
-    },
-    "public.origen_bodega_3pl": {
-      "name": "origen_bodega_3pl",
-      "schema": "public",
-      "values": [
-        "superadmin",
-        "autorregistro"
       ]
     },
     "public.origen_movimiento": {

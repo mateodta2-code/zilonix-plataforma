@@ -61,7 +61,7 @@ export function DesgloseCompetencia({
 
   if (resultado === null) return <p className={styles.nota}>Buscando a los vendedores del mismo producto…</p>;
   if (!resultado.ok) return <p className={styles.avisoError}>{resultado.aviso}</p>;
-  if (!resultado.catalogo) return <CompetidoresExtension propia={propia} siteId={siteId} idioma={idioma} />;
+  if (!resultado.catalogo) return <CompetidoresExtension propia={propia} cuentaMlId={cuentaMlId} siteId={siteId} idioma={idioma} sinPermisoMl={resultado.sinPermisoMl === true} />;
   if (resultado.competidores.length === 0) return <p className={styles.nota}>Nadie más vende este producto en el catálogo. ¡Vas solo!</p>;
 
   const plata = (v: number | null) => (v === null ? "—" : formatearMoneda(v, siteId));

@@ -296,9 +296,16 @@ function fechaDeRegistro(valor: string): string | null {
   return null;
 }
 
-// Busca la fila RECORD_TYPE = total: BALANCE_AMOUNT si es numérico; si no,
-// NET_CREDIT_AMOUNT − NET_DEBIT_AMOUNT. Sin fila total: el último
-// BALANCE_AMOUNT numérico. null si el CSV no trae un saldo legible.
+// Orden para leer el saldo (null si el CSV no trae uno legible):
+// 1. Fila RECORD_TYPE = total: NET_CREDIT_AMOUNT − NET_DEBIT_AMOUNT (la
+//    definición de Mercado Pago; su BALANCE_AMOUNT puede venir en 0.00).
+//    Solo si faltan esas columnas, su BALANCE_AMOUNT.
+// 2. Sin fila total explícita:
+//    a) si la última fila no trae DATE ni DESCRIPTION (fila resumen sin
+//       RECORD_TYPE, como el CSV de Colombia), su crédito − débito;
+//    b) si no, el BALANCE_AMOUNT de la última fila CON DATE (la fila
+//       resumen trae BALANCE_AMOUNT = 0.00 y no sirve);
+//    c) último recurso: el último BALANCE_AMOUNT numérico.
 export function extraerSaldoDeCsvLiberaciones(csvTexto: string): SaldoLiberaciones | null {
   const texto = csvTexto.replace(/^﻿/, "");
   const primeraLinea = texto.split(/\r?\n/, 1)[0] ?? "";
@@ -314,34 +321,51 @@ export function extraerSaldoDeCsvLiberaciones(csvTexto: string): SaldoLiberacion
   const iDebito = col("NET_DEBIT_AMOUNT");
   const iMoneda = col("CURRENCY");
   const iFecha = col("DATE");
+  const iDescripcion = col("DESCRIPTION");
   if (iBalance < 0 && (iCredito < 0 || iDebito < 0)) return null;
 
   const datos = filas.slice(1);
   const valor = (fila: string[], i: number) => (i >= 0 ? (fila[i] ?? "").trim() : "");
+  const neto = (fila: string[]): string | null => {
+    if (iCredito < 0 || iDebito < 0) return null;
+    const credito = montoADosDecimales(valor(fila, iCredito));
+    const debito = montoADosDecimales(valor(fila, iDebito));
+    return credito !== null && debito !== null ? restar(credito, debito) : null;
+  };
+  const balance = (fila: string[]) => montoADosDecimales(valor(fila, iBalance));
 
-  let saldo: string | null = null;
-  let filaSaldo: string[] | null = null;
-  const total = iTipo >= 0 ? [...datos].reverse().find((f) => valor(f, iTipo).toLowerCase() === "total") : undefined;
-  if (total) {
-    saldo = montoADosDecimales(valor(total, iBalance));
-    if (saldo === null) {
-      const credito = montoADosDecimales(valor(total, iCredito));
-      const debito = montoADosDecimales(valor(total, iDebito));
-      if (credito !== null && debito !== null) saldo = restar(credito, debito);
+  const buscarSaldo = (): { saldo: string; fila: string[] } | null => {
+    // 1. Fila total explícita.
+    const total = iTipo >= 0 ? [...datos].reverse().find((f) => valor(f, iTipo).toLowerCase() === "total") : undefined;
+    if (total) {
+      const s = neto(total) ?? balance(total);
+      if (s !== null) return { saldo: s, fila: total };
     }
-    if (saldo !== null) filaSaldo = total;
-  }
-  if (saldo === null) {
-    for (let i = datos.length - 1; i >= 0; i--) {
-      const s = montoADosDecimales(valor(datos[i], iBalance));
-      if (s !== null) {
-        saldo = s;
-        filaSaldo = datos[i];
-        break;
+    // 2a. Fila resumen sin RECORD_TYPE: última fila sin DATE ni DESCRIPTION.
+    const ultima = datos[datos.length - 1];
+    if (iFecha >= 0 && valor(ultima, iFecha) === "" && valor(ultima, iDescripcion) === "") {
+      const s = neto(ultima);
+      if (s !== null) return { saldo: s, fila: ultima };
+    }
+    // 2b. Última fila con DATE.
+    if (iFecha >= 0) {
+      for (let i = datos.length - 1; i >= 0; i--) {
+        if (valor(datos[i], iFecha) === "") continue;
+        const s = balance(datos[i]);
+        if (s !== null) return { saldo: s, fila: datos[i] };
       }
     }
-  }
-  if (saldo === null || filaSaldo === null) return null;
+    // 2c. Último recurso: el último BALANCE_AMOUNT numérico.
+    for (let i = datos.length - 1; i >= 0; i--) {
+      const s = balance(datos[i]);
+      if (s !== null) return { saldo: s, fila: datos[i] };
+    }
+    return null;
+  };
+
+  const encontrado = buscarSaldo();
+  if (!encontrado) return null;
+  const { saldo, fila: filaSaldo } = encontrado;
 
   let moneda = "COP";
   if (iMoneda >= 0) {

@@ -20,15 +20,15 @@ describe("extraerSaldoDeCsvLiberaciones", () => {
   it("coma: fila total con BALANCE_AMOUNT", () => {
     const csv = [
       "DATE,SOURCE_ID,DESCRIPTION,RECORD_TYPE,NET_CREDIT_AMOUNT,NET_DEBIT_AMOUNT,BALANCE_AMOUNT,CURRENCY",
-      "2026-11-20T10:00:00.000-05:00,1,initial_available_balance,initial_available_balance,0.00,0.00,1000.00,COP",
+      "2026-11-20T10:00:00.000-05:00,1,initial_available_balance,initial_available_balance,1000.00,0.00,1000.00,COP",
       "2026-11-21T15:30:00.000-05:00,2,payment,release,500.50,0.00,1500.50,COP",
-      ",,,total,500.50,0.00,1500.50,COP",
+      ",,,total,1500.50,0.00,1500.50,COP",
     ].join("\n");
     expect(extraerSaldoDeCsvLiberaciones(csv)).toEqual({ saldo: "1500.50", moneda: "COP", fecha: "2026-11-21" });
   });
 
   it("punto y coma, BOM, CRLF y encabezados en minúsculas", () => {
-    const csv = "﻿date;record_type;net_credit_amount;net_debit_amount;balance_amount;currency\r\n2026-11-22;release;10,00;0,00;1.234,56;mxn\r\n;Total;10,00;0,00;1.234,56;MXN\r\n";
+    const csv = "﻿date;record_type;net_credit_amount;net_debit_amount;balance_amount;currency\r\n2026-11-22;release;10,00;0,00;1.234,56;mxn\r\n;Total;1.234,56;0,00;1.234,56;MXN\r\n";
     expect(extraerSaldoDeCsvLiberaciones(csv)).toEqual({ saldo: "1234.56", moneda: "MXN", fecha: "2026-11-22" });
   });
 
@@ -39,6 +39,31 @@ describe("extraerSaldoDeCsvLiberaciones", () => {
       ",total,300.00,450.25,,COP",
     ].join("\n");
     expect(extraerSaldoDeCsvLiberaciones(csv)).toEqual({ saldo: "-150.25", moneda: "COP", fecha: "2026-11-21" });
+  });
+
+  it("fila total con BALANCE_AMOUNT = 0.00: manda NET_CREDIT − NET_DEBIT", () => {
+    const csv = [
+      "DATE,RECORD_TYPE,NET_CREDIT_AMOUNT,NET_DEBIT_AMOUNT,BALANCE_AMOUNT,CURRENCY",
+      "2026-11-25,release,500000.00,100000.00,400000.00,COP",
+      ",total,500000.00,100000.00,0.00,COP",
+    ].join("\n");
+    expect(extraerSaldoDeCsvLiberaciones(csv)).toEqual({ saldo: "400000.00", moneda: "COP", fecha: "2026-11-25" });
+  });
+
+  it("CSV real de Colombia: ';' sin RECORD_TYPE y fila resumen final sin fecha con BALANCE_AMOUNT = 0.00", () => {
+    const csv = [
+      "DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT;GROSS_AMOUNT;MP_FEE_AMOUNT;BALANCE_AMOUNT;CURRENCY;PAYMENT_METHOD",
+      "2026-11-19T00:00:00.000-05:00;;initial_available_balance;1000000.00;0.00;1000000.00;0.00;1000000.00;COP;",
+      "2026-11-24T09:12:40.000-05:00;90000000001;payment;150000.00;0.00;157500.00;-7500.00;1150000.00;COP;account_money",
+      "2026-11-26T14:03:11.000-05:00;90000000002;payout;0.00;27894.08;-27894.08;0.00;1122105.92;COP;",
+      ";;;1122105.92;0.00;1122105.92;0.00;0.00;;",
+    ].join("\n");
+    expect(extraerSaldoDeCsvLiberaciones(csv)).toEqual({ saldo: "1122105.92", moneda: "COP", fecha: "2026-11-26" });
+  });
+
+  it("sin RECORD_TYPE ni columnas NET: BALANCE_AMOUNT de la última fila con fecha, no el 0.00 de la fila sin fecha", () => {
+    const csv = ["DATE;DESCRIPTION;BALANCE_AMOUNT;CURRENCY", "2026-11-25;payment;800.00;COP", ";;0.00;"].join("\n");
+    expect(extraerSaldoDeCsvLiberaciones(csv)).toEqual({ saldo: "800.00", moneda: "COP", fecha: "2026-11-25" });
   });
 
   it("sin fila total: último BALANCE_AMOUNT numérico no vacío", () => {

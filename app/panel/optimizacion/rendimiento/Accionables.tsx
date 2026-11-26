@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Boton } from "@/components/marco/Boton";
+import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { formatearMoneda, formatearNumero } from "@/lib/ml/sitios";
 import { armarAccionables, elegirParaEnriquecer, ROTULO_ACCIONABLE, type Accionable, type ContextoItem, type SenalesItem } from "@/lib/optimizacion/accionables";
@@ -172,7 +172,12 @@ export function Accionables({ filas, cuentaMlId, siteId, idioma, periodo, verMon
                   <Link className={styles.enlace} href="/panel/preguntas">
                     Ir a la bandeja de preguntas
                   </Link>
-                ) : null}
+                ) : (
+                  // Puente directo a «Editar en Mercado Libre» (título, portada, galería, precio, stock).
+                  <BotonLink chico href={`/panel/optimizacion/${a.itemId}?cuenta=${cuentaMlId}${consultaPeriodo ? `&${consultaPeriodo}` : ""}#editar`}>
+                    Ir a la publicación
+                  </BotonLink>
+                )}
                 <Boton variante="secundario" chico type="button" onClick={() => marcarHecho(a)}>
                   Marcar hecho
                 </Boton>

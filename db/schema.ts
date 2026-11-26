@@ -2796,6 +2796,32 @@ export const optimizacionRevisiones = pgTable(
   })
 );
 
+// Optimización → competencia leída con la extensión (Mercado Libre niega la
+// competencia por API). Una fila por publicación propia: la última lectura de
+// sus competidores (hasta 10), para darles seguimiento sin repetir la búsqueda.
+// `competidores` ya viene validado por lib/optimizacion/competidoresExtension.ts.
+// Sin DELETE para app_user (db/rls-setup.sql): se reemplaza con cada lectura.
+export const optimizacionCompetidoresExt = pgTable(
+  "optimizacion_competidores_ext",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaMlId: uuid("cuenta_ml_id").references(() => cuentasMl.id, { onDelete: "cascade" }),
+    // Publicación propia (ej. MCO1342632705).
+    itemId: text("item_id").notNull(),
+    termino: text("termino").notNull(),
+    candidatos: integer("candidatos").notNull().default(0),
+    competidores: jsonb("competidores").$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
+    leidoTs: timestamp("leido_ts", { withTimezone: true }).notNull().defaultNow(),
+    usuarioId: uuid("usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    itemValido: check("optimizacion_competidores_ext_item_valido", sql`${t.itemId} ~ '^[A-Z]{3}[0-9]{6,15}$'`),
+    terminoLargo: check("optimizacion_competidores_ext_termino_largo", sql`char_length(${t.termino}) <= 120`),
+    unaPorPublicacion: unique("optimizacion_competidores_ext_empresa_item_unico").on(t.empresaId, t.itemId),
+  })
+);
+
 // Issue #422 (fase 4 de Finanzas) — gastos externos: lo que la empresa
 // paga por fuera de las plataformas (arriendo, nómina, empaques,
 // contador…). Cada empresa tiene sus propias categorías: nacen con las

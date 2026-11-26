@@ -268,23 +268,38 @@ export async function sincronizarSaldoMp(entrada: { empresaId: string; usuarioId
       return { estado: "en_preparacion" };
     };
 
+    const limpiarPendiente = () =>
+      dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMp).set({ reportePendienteFile: null, reportePendienteTs: null }).where(deEstaCuenta));
+    let pendiente = { reportePendienteFile: cuenta.reportePendienteFile, reportePendienteTs: cuenta.reportePendienteTs };
+
     // Con un id de tarea guardado, primero se pregunta por esa tarea.
     const taskId = taskIdPendiente(cuenta.reportePendienteFile);
     if (taskId) {
-      const tarea = await consultarTareaReporteLiberaciones(token, taskId);
-      if (tarea.status === "processed" && tarea.fileName) return await guardarSaldo(tarea.fileName);
-      if (tarea.status === "pending" || tarea.status === "processing") return { estado: "en_preparacion" };
-      if (tarea.status === "failed" || tarea.status === "deleted") {
-        await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMp).set({ reportePendienteFile: null, reportePendienteTs: null }).where(deEstaCuenta));
-        return await pedirReporte();
+      let tarea: Awaited<ReturnType<typeof consultarTareaReporteLiberaciones>> | null = null;
+      try {
+        tarea = await consultarTareaReporteLiberaciones(token, taskId);
+      } catch (error) {
+        // 404: Mercado Pago ya no conoce la tarea. Se olvida y se busca en
+        // el listado, para no dejar la cuenta atascada en mp_404.
+        if (!(error instanceof ErrorLiberacionesMp && error.codigo === "mp_404")) throw error;
+        await limpiarPendiente();
+        pendiente = { reportePendienteFile: null, reportePendienteTs: null };
       }
-      // Otro estado (o processed sin file_name): se busca en el listado.
+      if (tarea) {
+        if (tarea.status === "processed" && tarea.fileName) return await guardarSaldo(tarea.fileName);
+        if (tarea.status === "pending" || tarea.status === "processing") return { estado: "en_preparacion" };
+        if (tarea.status === "failed" || tarea.status === "deleted") {
+          await limpiarPendiente();
+          return await pedirReporte();
+        }
+        // Otro estado (o processed sin file_name): se busca en el listado.
+      }
     }
 
-    const reporte = elegirReporte(await listarReportesLiberaciones(token), cuenta);
+    const reporte = elegirReporte(await listarReportesLiberaciones(token), { ultimoSaldoTs: cuenta.ultimoSaldoTs, ...pendiente });
     if (reporte) return await guardarSaldo(reporte.fileName);
 
-    const pedidoReciente = cuenta.reportePendienteTs !== null && Date.now() - cuenta.reportePendienteTs.getTime() < ESPERA_REPORTE_PENDIENTE_MS;
+    const pedidoReciente = pendiente.reportePendienteTs !== null && Date.now() - pendiente.reportePendienteTs.getTime() < ESPERA_REPORTE_PENDIENTE_MS;
     if (pedidoReciente) return { estado: "en_preparacion" };
 
     return await pedirReporte();

@@ -146,6 +146,16 @@ export function leerMensajeCompetidores(datos: unknown, itemIdEsperado: string):
   };
 }
 
+// Revalida con el mismo lector que usa la página con el mensaje de la extensión.
+export function validarCompetidores(entrada: { itemId: string; termino: unknown; candidatos: unknown; competidores: unknown }): { termino: string; candidatos: number; competidores: CompetidorExtension[] } | null {
+  const m = leerMensajeCompetidores(
+    { fuente: "zilonix-extension", tipo: "competidores-leidos", payload: { excluirItemId: entrada.itemId, termino: entrada.termino, candidatos: entrada.candidatos, competidores: entrada.competidores } },
+    entrada.itemId
+  );
+  if (!m || m.tipo !== "ok" || !m.termino || m.competidores.length === 0) return null;
+  return { termino: m.termino, candidatos: m.candidatos, competidores: m.competidores };
+}
+
 const RAZONES: Record<string, string> = {
   captcha: "Mercado Libre pidió verificar que eres una persona. Resuélvelo en esa pestaña y vuelve a buscar.",
   sin_resultados: "La búsqueda no trajo publicaciones. Prueba con menos palabras (marca y modelo, por ejemplo).",

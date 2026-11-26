@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MlSinPermisoAppError } from "@/lib/ml/cliente";
 
 // Optimización, Fase 1 — acciones. Sin base ni Mercado Libre: se simulan
 // la sesión, el permiso, la cuenta, el token y las llamadas.
@@ -425,6 +426,11 @@ describe("Fase 4: competencia del mismo producto", () => {
     expect(r.alertas).toContain("Tu precio está 10 % arriba del más barato.");
     expect(r.alertas).toContain("Te falta Full (1 de 1 lo tienen).");
     expect(ml.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("si Mercado Libre niega el permiso, ofrece la extensión en vez de un error", async () => {
+    ml.producto.mockRejectedValue(new MlSinPermisoAppError("/items/MCO1"));
+    expect(await competenciaPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO1" })).toEqual({ ok: true, catalogo: false, sinPermisoMl: true });
   });
 
   it("fuera del catálogo avisa que necesita la extensión", async () => {

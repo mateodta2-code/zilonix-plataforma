@@ -1,9 +1,9 @@
 // Optimización — tarjetas de alerta como las de Mercado Libre (Central de
 // vendedores → Publicaciones). Lógica pura: sin base ni Mercado Libre.
-// Los textos son los de Mercado Libre; la cuarta tarjeta («Con
-// oportunidad…») no se inventa hasta que se confirme qué dice.
+// Los textos son los de Mercado Libre. «Con oportunidad de automatización»
+// y «Con cambio…» NO se inventan: faltan su dato y su texto completo.
 
-export type ClaveAlerta = "moderadas" | "competencia" | "precio_alto";
+export type ClaveAlerta = "sin_stock" | "calidad" | "moderadas" | "competencia" | "precio_alto";
 
 export type AlertaPublicaciones = {
   clave: ClaveAlerta;
@@ -15,9 +15,11 @@ export type AlertaPublicaciones = {
   revisadas?: { hechas: number; total: number };
 };
 
-export const CLAVES_ALERTA: readonly ClaveAlerta[] = ["moderadas", "competencia", "precio_alto"];
+export const CLAVES_ALERTA: readonly ClaveAlerta[] = ["sin_stock", "calidad", "moderadas", "competencia", "precio_alto"];
 
 const TEXTOS: Record<ClaveAlerta, { titulo: string; texto: string }> = {
+  sin_stock: { titulo: "Sin stock", texto: "Agrega unidades para poder vender." },
+  calidad: { titulo: "Con objetivos de calidad por lograr", texto: "Revisa qué puedes hacer para tener publicaciones con más calidad." },
   moderadas: { titulo: "Inactivas por incumplir políticas", texto: "Conoce qué pasó para evitar nuevas infracciones." },
   competencia: { titulo: "Para ganar la competencia en Mercado Libre", texto: "Revisa qué debes hacer para ser el vendedor destacado." },
   precio_alto: { titulo: "Con precio alto", texto: "Ajusta las publicaciones donde tu precio es más caro que el de tu competencia." },
@@ -42,7 +44,7 @@ export function pierdeCompetencia(estado: string | null | undefined): boolean {
 
 type EntradaAlerta = { cantidad: number | null; revisadas?: { hechas: number; total: number } | null };
 
-// Orden de Mercado Libre: moderadas, competencia, precio alto. «revisadas»
+// Orden de Mercado Libre: sin stock, calidad, moderadas, competencia, precio alto. «revisadas»
 // solo se agrega si se revisó menos de lo que había.
 export function armarAlertas(entrada: Record<ClaveAlerta, EntradaAlerta>): AlertaPublicaciones[] {
   return CLAVES_ALERTA.map((clave) => {
