@@ -1,6 +1,5 @@
 import { leerMonto } from "@/lib/importar-archivo";
 import { SITIOS_ML } from "@/lib/ml/sitios";
-import type { VerificacionEndpointsMp } from "@/lib/mp/saldo";
 
 // Issue #422 (fase 6 de Finanzas) — Disponible: «¿cuánta plata tengo hoy
 // y dónde?». Lógica pura, sin base de datos: saldo vigente de cada
@@ -168,19 +167,47 @@ export function totalesPorTipo(filas: FilaDisponible[]): { tipo: TipoCuentaDispo
   return TIPOS_CUENTA_DISPONIBLE.map((tipo) => ({ tipo, totales: totalesPorMoneda(filas.filter((f) => f.tipo === tipo)) }));
 }
 
-// ---------- Mercado Pago (diagnóstico de endpoints) ----------
+// ---------- Mercado Pago (Reporte de Liberaciones) ----------
 
-// Issue #422 — mientras se diseña el bloque definitivo, cada cuenta de
-// Mercado Pago activa solo muestra qué responden los endpoints oficiales
-// (lib/mp/saldo.ts → verificarEndpointsMp). Todavía no hay saldo en vivo:
-// nada de Mercado Pago suma a totalesPorMoneda ni a totalesPorTipo.
-// Errores del token (lib/finanzas/disponible-consulta.ts → leerVerificacionMp).
-export type CodigoErrorTokenMp = "mp_renovando" | "mp_reconectar" | "mp_error";
+// Issue #422 — el último saldo disponible de cada cuenta de Mercado Pago
+// activa, guardado en cuentas_mp por sincronizarSaldoMp
+// (lib/finanzas/disponible-consulta.ts). La página lo lee de la base, sin
+// llamar a Mercado Pago en cada visita.
+export type CuentaMpDisponible = {
+  id: string;
+  cuentaIdExterna: string;
+  nickname: string | null;
+  ultimoSaldoDisponible: string | null;
+  ultimaMoneda: string | null;
+  ultimoCorteFecha: string | null;
+  ultimoSaldoTs: Date | null;
+  reportePendienteFile: string | null;
+  reportePendienteTs: Date | null;
+  ultimoErrorSaldo: string | null;
+};
 
-export type VerificacionMpCuenta = { cuentaId: string; cuentaIdExterna: string; nickname: string | null } & (
-  | { estado: "ok"; verificacion: VerificacionEndpointsMp }
-  | { estado: "error"; codigo: CodigoErrorTokenMp }
-);
+// Solo las cuentas ya sincronizadas: suman a totalesPorMoneda y
+// totalesPorTipo como billeteras. El id lleva el prefijo "mp:" para que
+// nunca se confunda con el UUID de una cuenta manual.
+export function filasDesdeCuentasMp(cuentasMp: CuentaMpDisponible[], hoy: string): FilaDisponible[] {
+  return cuentasMp.flatMap((c): FilaDisponible[] => {
+    if (c.ultimoSaldoDisponible === null) return [];
+    return [
+      {
+        id: `mp:${c.id}`,
+        nombre: c.nickname || c.cuentaIdExterna,
+        tipo: "billetera",
+        entidad: "Mercado Pago",
+        ultimos4: null,
+        moneda: c.ultimaMoneda ?? "COP",
+        activa: true,
+        saldo: c.ultimoSaldoDisponible,
+        fechaCorte: c.ultimoCorteFecha,
+        desactualizado: esDesactualizado(c.ultimoCorteFecha, hoy),
+      },
+    ];
+  });
+}
 
 // ---------- Validación de formularios ----------
 
