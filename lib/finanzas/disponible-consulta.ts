@@ -4,6 +4,14 @@ import { cuentasDisponible, cuentasMl, saldosDisponible, usuarios } from "@/db/s
 import { registrarAuditoria } from "@/lib/auditoria";
 import { esUuid } from "@/lib/inventario/calculos";
 import { SITE_ID_DEFECTO, SITIOS_ML } from "@/lib/ml/sitios";
+import {
+  CandadoRenovacionMpError,
+  CuentaMpDesconectadaError,
+  listarCuentasMpActivas,
+  obtenerAccessTokenMpVigente,
+  RenovacionTokenMpFallidaError,
+} from "@/lib/mp/cuentas";
+import { consultarSaldoMp } from "@/lib/mp/saldo";
 import { requierePermiso } from "@/lib/permisos";
 import {
   DisponibleInvalidoError,
@@ -11,6 +19,7 @@ import {
   validarSaldo,
   type CuentaDisponible,
   type SaldoDisponible,
+  type SaldoMpCuenta,
 } from "./disponible";
 
 // Issue #422 (fase 6, Disponible) — lectura y escritura de cuentas y
@@ -70,6 +79,39 @@ export async function leerDisponible(
       .orderBy(asc(cuentasMl.creadoTs))
       .limit(1);
     return { cuentas, saldos, monedaSugerida: ml?.moneda ?? SITIOS_ML[SITE_ID_DEFECTO].moneda };
+  });
+}
+
+// Bloque 2 — saldo en vivo de cada cuenta de Mercado Pago activa. La
+// lista de cuentas sale de una transacción corta; el token y la consulta
+// a Mercado Pago van fuera de dbComoEmpresa y en paralelo: una cuenta
+// caída no tumba la página ni a las demás. Nunca se logea el token ni el
+// body de Mercado Pago: solo el nombre del error, el código y el status.
+export async function leerSaldosMp(empresaId: string, usuarioId: string): Promise<SaldoMpCuenta[]> {
+  await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
+  const cuentas = await listarCuentasMpActivas(empresaId);
+  if (cuentas.length === 0) return [];
+
+  const resultados = await Promise.allSettled(
+    cuentas.map(async (c) => consultarSaldoMp(await obtenerAccessTokenMpVigente(empresaId, c.id), c.cuentaIdExterna))
+  );
+
+  return cuentas.flatMap((c, i): SaldoMpCuenta[] => {
+    const base = { cuentaId: c.id, cuentaIdExterna: c.cuentaIdExterna, nickname: c.nickname };
+    const r = resultados[i];
+    if (r.status === "fulfilled") {
+      if (r.value.estado === "error") {
+        console.warn(`[lib/finanzas/disponible-consulta] saldo de Mercado Pago no disponible (cuenta ${c.id}):`, r.value.codigo, r.value.status ?? "");
+      }
+      return [{ ...base, ...r.value }];
+    }
+    const error = r.reason;
+    // Se desconectó entre la lista y el token: simplemente no se muestra.
+    if (error instanceof CuentaMpDesconectadaError) return [];
+    if (error instanceof CandadoRenovacionMpError) return [{ ...base, estado: "error", codigo: "mp_renovando" }];
+    if (error instanceof RenovacionTokenMpFallidaError) return [{ ...base, estado: "error", codigo: "mp_reconectar" }];
+    console.warn(`[lib/finanzas/disponible-consulta] error leyendo el saldo de Mercado Pago (cuenta ${c.id}):`, error instanceof Error ? error.name : "desconocido");
+    return [{ ...base, estado: "error", codigo: "mp_error" }];
   });
 }
 

@@ -4,14 +4,16 @@ import {
   armarFilas,
   DIAS_PARA_DESACTUALIZADO,
   ETIQUETA_TIPO_CUENTA,
+  filasDesdeSaldosMp,
   historialDeCuenta,
   MONEDAS_DISPONIBLE,
   TIPOS_CUENTA_DISPONIBLE,
   totalesPorMoneda,
   totalesPorTipo,
+  type SaldoMpCuenta,
   type TotalDisponible,
 } from "@/lib/finanzas/disponible";
-import { leerDisponible } from "@/lib/finanzas/disponible-consulta";
+import { leerDisponible, leerSaldosMp } from "@/lib/finanzas/disponible-consulta";
 import { diaBogota } from "@/lib/finanzas/utilidad-venta";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles";
@@ -31,11 +33,22 @@ import styles from "../finanzas.module.css";
 // Issue #422 (fase 6 de Finanzas) — Disponible: «¿cuánta plata tengo hoy
 // y dónde?». Ver exige finanzas.consultar; crear cuentas, registrar
 // saldos y desactivar, finanzas.modificar (también en actions.ts y en
-// lib/finanzas/disponible-consulta.ts). Los saldos se registran a mano:
-// el de Mercado Pago llega cuando exista la app (sin llamar a su API
-// todavía) y subir el extracto bancario queda para otro PR.
+// lib/finanzas/disponible-consulta.ts). Los saldos se registran a mano,
+// salvo Mercado Pago: cada cuenta conectada en /panel/conectar-ml se
+// consulta en vivo (Bloque 2) y su disponible suma a los totales. Subir
+// el extracto bancario queda para otro PR.
 
 const ETIQUETA_TIPO_SINGULAR = { banco: "Banco", billetera: "Billetera", efectivo: "Efectivo" } as const;
+
+const MENSAJE_ERROR_MP: Partial<Record<Extract<SaldoMpCuenta, { estado: "error" }>["codigo"], string>> = {
+  mp_renovando: "Renovando la conexión, recarga en unos segundos",
+  mp_reconectar: "Hay que reconectar la cuenta",
+};
+
+function textoErrorMp(r: Extract<SaldoMpCuenta, { estado: "error" }>): string {
+  const detalle = [r.codigo, r.status, r.codigoMp].filter((x) => x !== undefined && x !== "").join(" · ");
+  return `${MENSAJE_ERROR_MP[r.codigo] ?? "No disponible"} (${detalle})`;
+}
 
 function porMoneda(totales: TotalDisponible[]): string | undefined {
   if (totales.length === 0) return undefined;
@@ -61,19 +74,24 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
   const { usuario, activa: empresa, rolNombre } = await obtenerContextoPanel();
   let puedeModificar = false;
   let datos;
+  let saldosMp: SaldoMpCuenta[];
   try {
     const miMembresia = await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
     puedeModificar = tienePermiso(miMembresia.permisos, "finanzas", "modificar");
-    datos = await leerDisponible(empresa.id, usuario.id);
+    [datos, saldosMp] = await Promise.all([leerDisponible(empresa.id, usuario.id), leerSaldosMp(empresa.id, usuario.id)]);
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a Finanzas.`} />;
   }
 
   const hoy = diaBogota(new Date());
+  // `filas` = solo cuentas manuales (select de «Registrar saldo»,
+  // desactivar e historial esperan un UUID). Los totales suman además el
+  // disponible en vivo de Mercado Pago.
   const filas = armarFilas(datos.cuentas, datos.saldos, hoy);
-  const totales = totalesPorMoneda(filas);
-  const porTipo = totalesPorTipo(filas);
+  const filasTotales = [...filas, ...filasDesdeSaldosMp(saldosMp, hoy)];
+  const totales = totalesPorMoneda(filasTotales);
+  const porTipo = totalesPorTipo(filasTotales);
   const activas = filas.filter((f) => f.activa);
   const error = normalizarParametro(searchParams.error);
   const ok = normalizarParametro(searchParams.ok);
@@ -142,23 +160,70 @@ export default async function DisponiblePage({ searchParams }: { searchParams: R
               )}
             </FilaTabla>
           ))}
-          {/* El saldo automático llega cuando Mateo cree la app de Mercado
-              Pago; hasta entonces no se llama a su API ni suma al total. */}
-          <FilaTabla>
-            <CeldaTabla>
-              <strong>Mercado Pago (pendiente de conectar)</strong>
-            </CeldaTabla>
-            <CeldaTabla>Billetera</CeldaTabla>
-            <CeldaTabla>Mercado Pago</CeldaTabla>
-            <CeldaTabla numerica>
-              <span className={styles.suave}>—</span>
-            </CeldaTabla>
-            <CeldaTabla>—</CeldaTabla>
-            <CeldaTabla>
-              <Chip>Pendiente</Chip>
-            </CeldaTabla>
-            {puedeModificar && <CeldaTabla>{""}</CeldaTabla>}
-          </FilaTabla>
+          {saldosMp.length === 0 ? (
+            // Sin cuentas de Mercado Pago conectadas: la fila de siempre.
+            <FilaTabla>
+              <CeldaTabla>
+                <strong>Mercado Pago (pendiente de conectar)</strong>
+              </CeldaTabla>
+              <CeldaTabla>Billetera</CeldaTabla>
+              <CeldaTabla>Mercado Pago</CeldaTabla>
+              <CeldaTabla numerica>
+                <span className={styles.suave}>—</span>
+              </CeldaTabla>
+              <CeldaTabla>—</CeldaTabla>
+              <CeldaTabla>
+                <Chip>Pendiente</Chip>
+              </CeldaTabla>
+              {puedeModificar && <CeldaTabla>{""}</CeldaTabla>}
+            </FilaTabla>
+          ) : (
+            saldosMp.map((r) => (
+              <FilaTabla key={`mp:${r.cuentaId}`}>
+                <CeldaTabla>
+                  <strong>{r.nickname || r.cuentaIdExterna}</strong>
+                </CeldaTabla>
+                <CeldaTabla>Billetera</CeldaTabla>
+                <CeldaTabla>Mercado Pago</CeldaTabla>
+                <CeldaTabla numerica>
+                  {r.estado === "ok" ? (
+                    <>
+                      {mostrarMontoIso(r.disponible, r.moneda)}
+                      {r.porLiberar !== null && Number(r.porLiberar) > 0 && (
+                        <>
+                          <br />
+                          <span className={styles.suave}>+ {mostrarMontoIso(r.porLiberar, r.moneda)} por liberar</span>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <span className={styles.suave}>—</span>
+                  )}
+                </CeldaTabla>
+                <CeldaTabla>{r.estado === "ok" ? hoy : "—"}</CeldaTabla>
+                <CeldaTabla>
+                  {r.estado === "ok" ? (
+                    <Chip estado="exito" title="Saldo consultado a Mercado Pago al abrir la página">
+                      En vivo
+                    </Chip>
+                  ) : (
+                    <Chip estado="advertencia">{textoErrorMp(r)}</Chip>
+                  )}
+                </CeldaTabla>
+                {puedeModificar && (
+                  <CeldaTabla>
+                    {r.estado === "error" && r.codigo === "mp_reconectar" ? (
+                      <BotonLink href="/panel/conectar-ml" variante="fantasma">
+                        Reconectar
+                      </BotonLink>
+                    ) : (
+                      ""
+                    )}
+                  </CeldaTabla>
+                )}
+              </FilaTabla>
+            ))
+          )}
         </Tabla>
         {filas.length === 0 && (
           <EstadoVacio>Todavía no tienes cuentas. {puedeModificar ? "Crea la primera abajo." : "Pide a quien administra Finanzas que las cree."}</EstadoVacio>

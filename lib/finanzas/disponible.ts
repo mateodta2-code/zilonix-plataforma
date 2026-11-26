@@ -1,5 +1,6 @@
 import { leerMonto } from "@/lib/importar-archivo";
 import { SITIOS_ML } from "@/lib/ml/sitios";
+import type { SaldoMpError, SaldoMpOk } from "@/lib/mp/saldo";
 
 // Issue #422 (fase 6 de Finanzas) — Disponible: «¿cuánta plata tengo hoy
 // y dónde?». Lógica pura, sin base de datos: saldo vigente de cada
@@ -165,6 +166,42 @@ export function totalesPorMoneda(filas: FilaDisponible[]): TotalDisponible[] {
 
 export function totalesPorTipo(filas: FilaDisponible[]): { tipo: TipoCuentaDisponible; totales: TotalDisponible[] }[] {
   return TIPOS_CUENTA_DISPONIBLE.map((tipo) => ({ tipo, totales: totalesPorMoneda(filas.filter((f) => f.tipo === tipo)) }));
+}
+
+// ---------- Mercado Pago (saldo en vivo) ----------
+
+// Errores de la API de saldo (lib/mp/saldo.ts) más los del token
+// (lib/finanzas/disponible-consulta.ts → leerSaldosMp).
+export type CodigoErrorSaldoMpPanel = SaldoMpError["codigo"] | "mp_renovando" | "mp_reconectar" | "mp_error";
+
+export type SaldoMpCuenta = { cuentaId: string; cuentaIdExterna: string; nickname: string | null } & (
+  | SaldoMpOk
+  | { estado: "error"; codigo: CodigoErrorSaldoMpPanel; status?: number; codigoMp?: string }
+);
+
+// Solo los saldos que respondieron bien: un error no suma 0 al total,
+// simplemente no suma. El saldo «por liberar» tampoco suma (todavía no
+// está disponible). id con prefijo "mp:" para no chocar con los UUID de
+// cuentas_disponible.
+export function filasDesdeSaldosMp(resultados: SaldoMpCuenta[], hoy: string): FilaDisponible[] {
+  return resultados.flatMap((r) =>
+    r.estado === "ok"
+      ? [
+          {
+            id: `mp:${r.cuentaId}`,
+            nombre: r.nickname || r.cuentaIdExterna,
+            tipo: "billetera" as const,
+            entidad: "Mercado Pago",
+            ultimos4: null,
+            moneda: r.moneda,
+            activa: true,
+            saldo: r.disponible,
+            fechaCorte: hoy,
+            desactualizado: false,
+          },
+        ]
+      : []
+  );
 }
 
 // ---------- Validación de formularios ----------

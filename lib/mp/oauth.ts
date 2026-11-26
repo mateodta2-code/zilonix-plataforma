@@ -39,6 +39,9 @@ async function pedirTokens(body: URLSearchParams): Promise<TokensMp> {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body,
+    // Bloque 2: sin esto un Mercado Pago colgado dejaba el candado
+    // renovando_ts tomado hasta los 30s de CANDADO_ABANDONADO_MS.
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {
