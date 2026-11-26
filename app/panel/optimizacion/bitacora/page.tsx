@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { Boton } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { sufijoPestanas } from "@/lib/optimizacion/pestanas";
 import { Pestanas } from "@/components/marco/Pestanas";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { Tarjeta } from "@/components/marco/Tarjeta";
@@ -110,6 +111,11 @@ export default async function BitacoraGeneralPage({ searchParams }: { searchPara
     };
   });
 
+  const periodoUrl: Record<string, string> = {};
+  for (const clave of ["periodo", "dias", "desde", "hasta"]) {
+    const valor = primero(searchParams?.[clave]);
+    if (valor) periodoUrl[clave] = valor;
+  }
   const sufijo = cuentaId ? `?cuenta=${cuentaId}` : "";
   const hrefPagina = (p: number) => {
     const u = new URLSearchParams();
@@ -127,6 +133,8 @@ export default async function BitacoraGeneralPage({ searchParams }: { searchPara
       <Pestanas
         pestanas={[
           { etiqueta: "Publicaciones", href: `/panel/optimizacion${sufijo}`, activa: false },
+          { etiqueta: "Análisis", href: `/panel/optimizacion/analisis${sufijoPestanas(cuentaId, periodoUrl)}`, activa: false },
+          { etiqueta: "Rendimiento", href: `/panel/optimizacion/rendimiento${sufijoPestanas(cuentaId, periodoUrl)}`, activa: false },
           { etiqueta: "Bitácora", href: `/panel/optimizacion/bitacora${sufijo}`, activa: true },
         ]}
       />
