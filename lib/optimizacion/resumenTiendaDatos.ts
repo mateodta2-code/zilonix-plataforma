@@ -13,7 +13,8 @@ import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
 import type { PeriodoLista } from "./periodoLista";
 import { resumirTienda, type PeriodoTienda, type ResumenTienda, type VentaTienda } from "./resumenTienda";
 
-export type DatosResumenTienda = { periodo: PeriodoTienda; actual: ResumenTienda; anterior: ResumenTienda };
+// `cuentaId`: para que los enlaces del resumen (Análisis, Rendimiento) conserven la cuenta.
+export type DatosResumenTienda = { cuentaId: string; periodo: PeriodoTienda; actual: ResumenTienda; anterior: ResumenTienda };
 
 export async function leerResumenTienda(
   empresaId: string,
@@ -62,6 +63,7 @@ export async function leerResumenTienda(
     unidades: f.unidades,
   }));
   return {
+    cuentaId: cuenta.id,
     periodo,
     actual: resumirTienda(ventas, periodo.desde, periodo.hasta, visitasActual),
     anterior: resumirTienda(ventas, periodo.anteriorDesde, periodo.anteriorHasta, visitasAnterior),
