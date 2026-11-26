@@ -135,8 +135,17 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
     throw new FalabellaNoDisponibleError(`Falabella respondió ${res.status} sin cuerpo JSON legible.`);
   }
   if (cuerpo.ErrorResponse) {
+    // Issue #422 (sonda del 18/11, respuesta real): Falabella manda el
+    // código y el mensaje DENTRO de ErrorResponse.Head — p. ej.
+    // { Head: { ErrorCode: "E008", ErrorMessage: "Invalid Action" } }.
+    // Antes solo se miraba el nivel de arriba y todo error salía como
+    // "desconocido". Se deja el nivel de arriba como respaldo.
     const err = cuerpo.ErrorResponse;
-    throw new FalabellaApiError(String(err.ErrorCode ?? "desconocido"), String(err.ErrorMessage ?? "Error desconocido de Falabella."));
+    const head = err.Head && typeof err.Head === "object" ? err.Head : {};
+    throw new FalabellaApiError(
+      String(head.ErrorCode ?? err.ErrorCode ?? "desconocido"),
+      String(head.ErrorMessage ?? err.ErrorMessage ?? "Error desconocido de Falabella."),
+    );
   }
   if (!cuerpo.SuccessResponse) {
     throw new FalabellaNoDisponibleError( `Falabella respondió ${res.status} sin SuccessResponse ni ErrorResponse.`);

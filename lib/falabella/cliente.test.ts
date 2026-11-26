@@ -53,6 +53,16 @@ describe("llamarFalabella / verificarCredenciales", () => {
     await expect(verificarCredenciales(credenciales)).rejects.toBeInstanceOf(FalabellaApiError);
   });
 
+  it("lee código y mensaje desde ErrorResponse.Head (formato real, issue #422)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        respuestaJson({ ErrorResponse: { Head: { RequestAction: "GetPayoutStatus", ErrorType: "Sender", ErrorCode: "E008", ErrorMessage: "Invalid Action" }, Body: "" } }),
+      ),
+    );
+    await expect(verificarCredenciales(credenciales)).rejects.toMatchObject({ codigo: "E008", message: "Invalid Action" });
+  });
+
   it("si Falabella acepta (SuccessResponse), no lanza", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuestaJson({ SuccessResponse: { Head: {}, Body: { Orders: [] } } })));
     await expect(verificarCredenciales(credenciales)).resolves.toBeUndefined();
