@@ -393,6 +393,13 @@
       "when": 1795732768548,
       "tag": "0055_competidores_extension",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795736536757,
+      "tag": "0056_sharp_champions",
+      "breakpoints": true
     }
   ]
 }

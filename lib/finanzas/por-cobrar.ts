@@ -50,8 +50,26 @@ export function extraerFechaProgramadaFalabella(estados: (string | null)[]): str
   return mejor;
 }
 
+// De dónde sale la partida: «mp» = pagos sin liberar leídos de Mercado
+// Pago (pagos_mp_por_cobrar); «ventas» = estimado desde pedidos_finanzas
+// (cuentas ML sin Mercado Pago sincronizado); «falabella» = reporte de
+// transacciones.
+export const FUENTES_POR_COBRAR = ["mp", "ventas", "falabella"] as const;
+export type FuentePorCobrar = (typeof FUENTES_POR_COBRAR)[number];
+
+export const ETIQUETA_FUENTE: Record<FuentePorCobrar, string> = {
+  mp: "Mercado Pago",
+  ventas: "Estimado ventas",
+  falabella: "Reporte Falabella",
+};
+
 export type PartidaPorCobrar = {
   marketplace: MarketplacePorCobrar;
+  fuente: FuentePorCobrar;
+  // true = plata retenida por un reclamo (in_mediation): no tiene fecha
+  // de entrada confiable, así que suma a «retenido» y al total, nunca a
+  // esta semana / próximo mes / vencido / sin fecha.
+  retenido: boolean;
   cuentaId: string;
   cuenta: string;
   moneda: string;
@@ -66,6 +84,29 @@ export type PartidaPorCobrar = {
   // suma a los totales — el monto no se adivina.
   monto: string | null;
 };
+
+// ---------- Mercado Pago ↔ Mercado Libre (sin doble conteo) ----------
+
+type CuentaExterna = { id: string; cuentaIdExterna: string; nickname: string | null };
+
+// Una cuenta ML cuyo user_id (cuenta_id_externa) tiene una cuenta MP ya
+// sincronizada queda «reemplazada»: sus partidas salen de Mercado Pago y
+// el estimado de pedidos_finanzas se omite. Una cuenta MP sin cuenta ML
+// emparejada se muestra con su propio id y nombre.
+export function emparejarCuentasMp(
+  cuentasMl: (CuentaExterna & { nickname: string })[],
+  cuentasMpSincronizadas: CuentaExterna[]
+): { reemplazadas: Set<string>; destinoMp: Map<string, { cuentaId: string; cuenta: string }> } {
+  const mlPorExterna = new Map(cuentasMl.map((c) => [c.cuentaIdExterna, c]));
+  const reemplazadas = new Set<string>();
+  const destinoMp = new Map<string, { cuentaId: string; cuenta: string }>();
+  for (const c of cuentasMpSincronizadas) {
+    const emparejada = mlPorExterna.get(c.cuentaIdExterna);
+    if (emparejada) reemplazadas.add(emparejada.id);
+    destinoMp.set(c.id, emparejada ? { cuentaId: emparejada.id, cuenta: emparejada.nickname } : { cuentaId: c.id, cuenta: c.nickname ?? c.cuentaIdExterna });
+  }
+  return { reemplazadas, destinoMp };
+}
 
 // ---------- Montos (diezmilésimas, BigInt) ----------
 
@@ -118,6 +159,15 @@ export function ventanasBogota(ahora: Date): Ventanas {
 // esconde: es «vencida» (debió entrar y no entró — reclamo, mediación o
 // la sync no volvió a pasar por esa venta). Va aparte de «esta semana».
 export const estaVencida = (p: Pick<PartidaPorCobrar, "fechaEsperada">, v: Ventanas) => p.fechaEsperada !== null && p.fechaEsperada < v.hoy;
+
+// Estado claro para el detalle de Mercado Libre. Falabella conserva el
+// estado de su reporte.
+export function estadoVisiblePartida(p: PartidaPorCobrar, v: Ventanas): string | null {
+  if (p.marketplace !== "ml") return p.estado;
+  if (p.retenido) return "Retenido (reclamo)";
+  if (estaVencida(p, v)) return "Vencido";
+  return "Por liberar";
+}
 const entraEstaSemana = (fecha: string | null, v: Ventanas) => fecha !== null && fecha >= v.semana.desde && fecha <= v.semana.hasta;
 const entraProximoMes = (fecha: string | null, v: Ventanas) => fecha !== null && fecha >= v.proximoMes.desde && fecha <= v.proximoMes.hasta;
 
@@ -126,7 +176,10 @@ const entraProximoMes = (fecha: string | null, v: Ventanas) => fecha !== null &&
 export type TotalesMoneda = {
   moneda: string;
   partidas: number;
+  // total = porLiberar + retenido.
   total: string;
+  porLiberar: string;
+  retenido: string;
   estaSemana: string;
   proximoMes: string;
   sinFecha: string;
@@ -135,8 +188,17 @@ export type TotalesMoneda = {
   sinNeto: number;
 };
 
-type Acumulado = { partidas: number; total: bigint; estaSemana: bigint; proximoMes: bigint; sinFecha: bigint; vencido: bigint; sinNeto: number };
-const nuevo = (): Acumulado => ({ partidas: 0, total: CERO, estaSemana: CERO, proximoMes: CERO, sinFecha: CERO, vencido: CERO, sinNeto: 0 });
+type Acumulado = {
+  partidas: number;
+  porLiberar: bigint;
+  retenido: bigint;
+  estaSemana: bigint;
+  proximoMes: bigint;
+  sinFecha: bigint;
+  vencido: bigint;
+  sinNeto: number;
+};
+const nuevo = (): Acumulado => ({ partidas: 0, porLiberar: CERO, retenido: CERO, estaSemana: CERO, proximoMes: CERO, sinFecha: CERO, vencido: CERO, sinNeto: 0 });
 
 function acumular(a: Acumulado, p: PartidaPorCobrar, v: Ventanas): void {
   a.partidas += 1;
@@ -145,7 +207,11 @@ function acumular(a: Acumulado, p: PartidaPorCobrar, v: Ventanas): void {
     return;
   }
   const monto = aDiezmilesimas(p.monto);
-  a.total += monto;
+  if (p.retenido) {
+    a.retenido += monto;
+    return;
+  }
+  a.porLiberar += monto;
   if (estaVencida(p, v)) a.vencido += monto;
   if (entraEstaSemana(p.fechaEsperada, v)) a.estaSemana += monto;
   if (entraProximoMes(p.fechaEsperada, v)) a.proximoMes += monto;
@@ -154,7 +220,9 @@ function acumular(a: Acumulado, p: PartidaPorCobrar, v: Ventanas): void {
 
 const textos = (a: Acumulado) => ({
   partidas: a.partidas,
-  total: aTextoMonto(a.total),
+  total: aTextoMonto(a.porLiberar + a.retenido),
+  porLiberar: aTextoMonto(a.porLiberar),
+  retenido: aTextoMonto(a.retenido),
   estaSemana: aTextoMonto(a.estaSemana),
   proximoMes: aTextoMonto(a.proximoMes),
   sinFecha: aTextoMonto(a.sinFecha),
