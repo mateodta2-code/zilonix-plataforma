@@ -382,6 +382,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
     "la llama un cron, sin sesión de usuario (issue #175) — el permiso real es el secreto compartido x-seguimiento-trabajador-secret, y la conexión seguimiento_trabajador_user (db/trabajador-seguimiento-context.ts) solo puede tocar seguimientos_ml, ninguna otra tabla",
   "app/api/trabajos/publicidad/route.ts":
     "la llama un cron, sin sesión de usuario (issue #254) — el permiso real es el secreto compartido x-publicidad-trabajador-secret, y la conexión publicidad_trabajador_user (db/trabajador-publicidad-context.ts) solo puede listar columnas no secretas de cuentas_ml y leer publicidad_sincronizaciones, nunca los tokens",
+  "app/api/trabajos/falabella/route.ts":
+    "la llama un cron, sin sesión de usuario (issue #422) — el permiso real es el secreto compartido x-falabella-trabajador-secret, y la conexión falabella_trabajador_user (db/trabajador-falabella-context.ts) solo puede listar id, empresa_id y desconectada_ts de cuentas_falabella, nunca la API Key",
   "app/panel/sku/importar/actions.ts":
     "el permiso real (requierePermiso('inventario','modificar')) vive en lib/ml/sku-importar.ts (previsualizarImportacionSkus/confirmarImportacionSkus), llamado ANTES de leer o escribir — este archivo solo adapta el formulario a esas dos funciones, nunca toca la base por su cuenta",
   "app/panel/conectar-ml/confirmar-transferencia/actions.ts":
@@ -554,6 +556,7 @@ const RUTAS_DE_MAQUINA: Record<string, string> = {
   "app/api/extension/config/route.ts": "/api/extension/config",
   "app/api/trabajos/seguimiento/route.ts": "/api/trabajos/seguimiento",
   "app/api/trabajos/publicidad/route.ts": "/api/trabajos/publicidad",
+  "app/api/trabajos/falabella/route.ts": "/api/trabajos/falabella",
 };
 
 // La única ruta pública en el middleware que NO está exenta de

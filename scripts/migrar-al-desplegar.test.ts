@@ -50,10 +50,10 @@ describe("decidirMigracion — cerrado por defecto", () => {
 });
 
 describe("rolesQueCreaRlsSetup", () => {
-  it("encuentra los 5 roles que hoy crea db/rls-setup.sql", () => {
+  it("encuentra los 6 roles que hoy crea db/rls-setup.sql", () => {
     const texto = readFileSync(join(process.cwd(), "db/rls-setup.sql"), "utf8");
     expect(rolesQueCreaRlsSetup(texto).sort()).toEqual(
-      ["app_user", "publicidad_trabajador_user", "seguimiento_trabajador_user", "superadmin_user", "trabajador_user"].sort()
+      ["app_user", "falabella_trabajador_user", "publicidad_trabajador_user", "seguimiento_trabajador_user", "superadmin_user", "trabajador_user"].sort()
     );
   });
 

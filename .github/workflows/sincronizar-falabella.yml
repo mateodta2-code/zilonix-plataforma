@@ -1,0 +1,52 @@
+name: Sincronizar pedidos Falabella (staging)
+
+# Issue #422 — trae solos los pedidos de Falabella cada 30 minutos, con
+# el mismo modelo que sincronizar-publicidad.yml. Apunta a STAGING.
+# Producción queda comentada: entra el sábado 28 con Mateo.
+#
+# Secreto de GitHub para staging, con este nombre exacto:
+# FALABELLA_TRABAJADOR_SECRET_STAGING. Tiene que coincidir con la
+# variable FALABELLA_TRABAJADOR_SECRET de Railway en staging. El de
+# producción, cuando toque, es FALABELLA_TRABAJADOR_SECRET_PRODUCCION
+# (solo el nombre). Nunca el valor en este archivo.
+#
+# Cada corrida importa los últimos 3 días de cada cuenta conectada. Se
+# puede repetir sin duplicar: importarPedidos hace upsert por
+# (empresa_id, pedido_id_externo). Una cuenta que falla no corta a las
+# demás; queda en auditoria como "sistema". concurrency evita dos
+# corridas a la vez contra Falabella.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: sincronizar-falabella-staging
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Importar pedidos Falabella en staging
+        run: |
+          set -euo pipefail
+          cuerpo=$(curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/falabella" \
+            -H "x-falabella-trabajador-secret: ${{ secrets.FALABELLA_TRABAJADOR_SECRET_STAGING }}" \
+            --max-time 300)
+          echo "$cuerpo"
+          fallidas=$(printf '%s' "$cuerpo" | sed -n 's/.*"fallidas":\([0-9][0-9]*\).*/\1/p')
+          if [ -z "$fallidas" ]; then
+            echo "La respuesta no trajo el resumen."
+            exit 1
+          fi
+          if [ "$fallidas" != "0" ]; then
+            echo "::warning::${fallidas} cuenta(s) fallaron. El detalle quedó en auditoria."
+          fi
+
+# Producción, el sábado 28 con Mateo. Mismo paso, contra el dominio y
+# el secreto de producción, nunca este URL de staging:
+# curl -sf -X POST "https://<dominio-produccion>/api/trabajos/falabella" \
+#   -H "x-falabella-trabajador-secret: ${{ secrets.FALABELLA_TRABAJADOR_SECRET_PRODUCCION }}" \
+#   --max-time 300
