@@ -55,6 +55,8 @@ export function elegirCandidatas(filas: FilaRendimiento[]): string[] {
     .map((f) => f.itemId);
 }
 
+export type DatosTraidos = { visitas: Record<string, number | null>; categorias: Record<string, string>; cargando: boolean };
+
 export function TablaRendimiento({
   filas,
   grupo,
@@ -62,6 +64,7 @@ export function TablaRendimiento({
   siteId,
   idioma,
   periodo,
+  alCambiarDatos,
 }: {
   filas: FilaRendimiento[];
   // Filtro de ?grupo=; las medianas siempre salen de toda la cuenta.
@@ -70,6 +73,9 @@ export function TablaRendimiento({
   siteId: string;
   idioma: string;
   periodo: PeriodoLista;
+  // «Qué hacer primero» reusa lo ya traído (visitas y categorías): sin
+  // llamadas extra a Mercado Libre para esos datos.
+  alCambiarDatos?: (datos: DatosTraidos) => void;
 }) {
   const [visitas, setVisitas] = useState<Record<string, number | null>>({});
   const [categorias, setCategorias] = useState<Record<string, string>>({});
@@ -123,6 +129,11 @@ export function TablaRendimiento({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firma]);
+
+  useEffect(() => {
+    alCambiarDatos?.({ visitas, categorias, cargando });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitas, categorias, cargando]);
 
   const entradas = useMemo(
     () =>

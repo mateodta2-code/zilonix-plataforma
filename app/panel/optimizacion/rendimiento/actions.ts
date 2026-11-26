@@ -2,14 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl } from "@/db/schema";
+import { cuentasMl, publicaciones } from "@/db/schema";
 import { listarEmpresasDeUsuario } from "@/lib/empresas";
-import { categoriasItemsMl, PATRON_ID_PRODUCTO_O_ITEM, visitasItemMl } from "@/lib/ml/cliente";
+import { calidadItemMl, categoriasItemsMl, competenciaItemMl, PATRON_ID_PRODUCTO_O_ITEM, referenciaPrecioItemMl, visitasItemMl } from "@/lib/ml/cliente";
 import { obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
+import { leerBandejaPreguntas, motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { hastaExclusivoIso, leerPeriodoLista } from "@/lib/optimizacion/periodoLista";
+import type { SenalesItem } from "@/lib/optimizacion/accionables";
+import { minutosDesde } from "@/lib/preguntas/tiempo";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 
@@ -19,6 +21,12 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 // Topes por carga de la página (rate limiting): categorías, 1 llamada del
 // cliente con ≤ 100 ids = 5 multigets de 20; visitas, ≤ 100 publicaciones,
 // 1 llamada a ML cada una, de a 3 (MAXIMO_VISITAS_POR_PEDIDO). Total: ≤ 105.
+//
+// «Qué hacer primero» (accionables): contexto = 1 lectura a la base (stock y
+// precio) + la bandeja de preguntas (1 búsqueda y 1 de reclamos por cuenta
+// de la empresa, más 1 por motivo de reclamo distinto); señales = ≤ 10
+// publicaciones × 3 lecturas (calidad, referencia de precio, competencia),
+// de a 3 publicaciones por pedido, sin caché. Total: ≤ 30 + la bandeja.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAXIMO_PUBLICACIONES_RENDIMIENTO = 100;
@@ -39,13 +47,13 @@ async function cuentaPermitida(cuentaMlId: string) {
   if (typeof cuentaMlId !== "string" || !UUID.test(cuentaMlId)) return { ok: false as const, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
   const [cuenta] = await dbComoEmpresa(empresa.id, (tx) =>
     tx
-      .select({ id: cuentasMl.id })
+      .select({ id: cuentasMl.id, siteId: cuentasMl.siteId })
       .from(cuentasMl)
       .where(and(eq(cuentasMl.id, cuentaMlId), eq(cuentasMl.empresaId, empresa.id), isNull(cuentasMl.desconectadaTs)))
   );
   if (!cuenta) return { ok: false as const, aviso: "Esa cuenta de Mercado Libre ya no está conectada a esta empresa." };
   try {
-    return { ok: true as const, token: await obtenerAccessTokenVigente(empresa.id, cuenta.id) };
+    return { ok: true as const, token: await obtenerAccessTokenVigente(empresa.id, cuenta.id), empresaId: empresa.id, usuarioId: usuario.id, siteId: cuenta.siteId };
   } catch (error) {
     return { ok: false as const, aviso: motivoCuentaSinRevisar(error) };
   }
@@ -91,4 +99,90 @@ export async function visitasRendimientoAction(entrada: {
     })
   );
   return { ok: true, visitas };
+}
+
+// ---------- Qué hacer primero ----------
+
+const MAXIMO_SENALES_POR_PEDIDO = 3;
+const MINUTOS_PREGUNTA_VIEJA = 24 * 60;
+
+export type ContextoAccionable = { stock: number | null; precio: number | null; preguntasSinResponder: number };
+export type ResultadoContextoAccionables = { ok: true; contexto: Record<string, ContextoAccionable>; avisos: string[] } | { ok: false; aviso: string };
+
+// Stock y precio salen de lo que Seller ya importó (no de Mercado Libre);
+// el precio solo con ventas/consultar. Las preguntas de más de 24 h, de la
+// bandeja, filtradas por esta cuenta (también con ventas/consultar, como /panel/preguntas).
+export async function contextoAccionablesAction(entrada: { cuentaMlId: string; ids: string[] }): Promise<ResultadoContextoAccionables> {
+  const ctx = await cuentaPermitida(entrada.cuentaMlId);
+  if (!ctx.ok) return ctx;
+  let verVentas = true;
+  try {
+    await requierePermiso(ctx.usuarioId, ctx.empresaId, "ventas", "consultar");
+  } catch (error) {
+    if (!(error instanceof SinPermisoError)) throw error;
+    verVentas = false;
+  }
+  const contexto: Record<string, ContextoAccionable> = {};
+  const avisos: string[] = [];
+  const ids = idsValidos(entrada.ids, MAXIMO_PUBLICACIONES_RENDIMIENTO);
+  try {
+    const filas = ids.length
+      ? await dbComoEmpresa(ctx.empresaId, (tx) =>
+          tx
+            .select({ id: publicaciones.publicacionIdExterno, stock: publicaciones.stock, precio: publicaciones.precio })
+            .from(publicaciones)
+            .where(and(eq(publicaciones.empresaId, ctx.empresaId), eq(publicaciones.cuentaMlId, entrada.cuentaMlId), inArray(publicaciones.publicacionIdExterno, ids)))
+        )
+      : [];
+    for (const f of filas) contexto[f.id] = { stock: f.stock, precio: verVentas ? Number(f.precio) : null, preguntasSinResponder: 0 };
+  } catch (error) {
+    console.warn(`[rendimiento] accionables, stock: ${error instanceof Error ? error.name : "error"}`);
+    avisos.push("No se pudo leer el stock: sin la regla «Sin stock».");
+  }
+  if (verVentas) {
+    try {
+      const bandeja = await leerBandejaPreguntas(ctx.empresaId);
+      const ahora = new Date();
+      for (const p of bandeja.preguntas) {
+        if (p.cuentaMlId !== entrada.cuentaMlId || !p.itemId) continue;
+        const minutos = minutosDesde(p.fecha, ahora);
+        if (minutos === null || minutos <= MINUTOS_PREGUNTA_VIEJA) continue;
+        const c = (contexto[p.itemId] ??= { stock: null, precio: null, preguntasSinResponder: 0 });
+        c.preguntasSinResponder += 1;
+      }
+    } catch (error) {
+      console.warn(`[rendimiento] accionables, preguntas: ${error instanceof Error ? error.name : "error"}`);
+      avisos.push("No se pudieron leer las preguntas pendientes.");
+    }
+  }
+  return { ok: true, contexto, avisos };
+}
+
+export type ResultadoSenalesAccionables = { ok: true; senales: Record<string, SenalesItem> } | { ok: false; aviso: string };
+
+// Solo GET: calidad, referencia de precio y competencia de ≤ 3 publicaciones.
+// Una lectura que falla queda sin dato; no tumba las demás.
+export async function senalesAccionablesAction(entrada: { cuentaMlId: string; ids: string[] }): Promise<ResultadoSenalesAccionables> {
+  const ctx = await cuentaPermitida(entrada.cuentaMlId);
+  if (!ctx.ok) return ctx;
+  const senales: Record<string, SenalesItem> = {};
+  await Promise.all(
+    idsValidos(entrada.ids, MAXIMO_SENALES_POR_PEDIDO).map(async (id) => {
+      const [calidad, referencia, competencia] = [
+        await calidadItemMl(id, ctx.token).catch(() => null),
+        await referenciaPrecioItemMl(id, ctx.token).catch(() => null),
+        await competenciaItemMl(id, ctx.token, ctx.siteId).catch(() => null),
+      ];
+      senales[id] = {
+        calidad: calidad ? { nivel: calidad.nivel, pendientes: calidad.pendientes } : null,
+        referenciaEstado: referencia?.estado ?? null,
+        referenciaPrecioActual: referencia?.precioActual ?? null,
+        referenciaPrecioSugerido: referencia?.precioSugerido ?? null,
+        referenciaDiferencia: referencia?.diferenciaPorcentaje ?? null,
+        competenciaEstado: competencia?.estado ?? null,
+        competenciaPrecioParaGanar: competencia?.precioParaGanar ?? null,
+      };
+    })
+  );
+  return { ok: true, senales };
 }
