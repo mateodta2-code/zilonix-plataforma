@@ -7,7 +7,7 @@
 // Ojo: pedido_items solo existe para las ventas que ya tienen su foto de
 // Finanzas. Una venta todavía sin sincronizar no suma acá.
 
-import { and, eq, gte, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, notInArray, sql } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { pedidoItems, pedidos, pedidosFinanzas } from "@/db/schema";
 import { ESTADOS_QUE_NO_SON_VENTA } from "@/lib/estados-venta";
@@ -18,7 +18,9 @@ export async function ventasRecientesPorItem(
   empresaId: string,
   cuentaMlId: string,
   itemIds: string[],
-  desde: Date
+  desde: Date,
+  // Exclusivo (fin del día `hasta` de Bogotá). Sin él, hasta ahora.
+  hasta?: Date
 ): Promise<Map<string, VentasItem>> {
   if (itemIds.length === 0) return new Map();
   const filas = await dbComoEmpresa(empresaId, (tx) =>
@@ -40,6 +42,7 @@ export async function ventasRecientesPorItem(
           eq(pedidos.cuentaMlId, cuentaMlId),
           inArray(pedidoItems.itemIdExterno, itemIds),
           gte(pedidos.fecha, desde),
+          ...(hasta ? [lt(pedidos.fecha, hasta)] : []),
           notInArray(pedidos.estado, ESTADOS_QUE_NO_SON_VENTA),
           sql`coalesce(${pedidosFinanzas.cancelada}, false) = false`
         )
