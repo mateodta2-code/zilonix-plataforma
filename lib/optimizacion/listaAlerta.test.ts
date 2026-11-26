@@ -15,9 +15,10 @@ vi.mock("@/lib/optimizacion/ventas", () => ({ ventasRecientesPorItem: async () =
 vi.mock("@/lib/optimizacion/alertasDatos", () => ({ alertaPrecioAlto: ml.precio, alertaCompetencia: ml.comp }));
 
 import { leerPaginaOptimizacion } from "./lista";
+import { leerPeriodoLista } from "./periodoLista";
 
 const cuenta = { id: "c", cuentaIdExterna: "1", siteId: "MCO" };
-const filtros = { estado: "pausadas" as const, texto: "ignorado", pagina: 1, dias: 7 as const };
+const filtros = { estado: "pausadas" as const, texto: "ignorado", pagina: 1, periodo: leerPeriodoLista({}, new Date()) };
 const ids = (n: number, d = 0) => Array.from({ length: n }, (_, i) => `MCO${d + i + 1}`);
 
 beforeEach(() => {

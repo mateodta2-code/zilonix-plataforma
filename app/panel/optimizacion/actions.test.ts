@@ -153,11 +153,33 @@ describe("metricasPublicacionesAction (solo lectura)", () => {
 
   it("pide las visitas del período elegido; uno fuera de la lista cae a 7", async () => {
     await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }], dias: 90 });
-    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 90);
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 90, undefined);
     await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }], dias: 500 });
-    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7);
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7, undefined);
     await metricasPublicacionesAction({ cuentaMlId: CUENTA, items: [{ id: "MCO1", catalogo: false }] });
-    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7);
+    expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7, undefined);
+  });
+
+  it("revalida el período en el servidor: rango y «hoy» piden last + ending exclusivo; uno inválido cae a 7", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T17:00:00Z"));
+    try {
+      const items = [{ id: "MCO1", catalogo: false }];
+      await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo: { desde: "2026-11-01", hasta: "2026-11-15" } });
+      expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 15, "2026-11-16");
+      await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo: { desde: "2026-11-25", hasta: "2026-11-25" } });
+      expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 1, "2026-11-26");
+      // Invertido: se endereza.
+      await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo: { desde: "2026-11-15", hasta: "2026-11-01" } });
+      expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 15, "2026-11-16");
+      // Futuro, muy viejo o basura: el período por defecto, sin ending.
+      for (const periodo of [{ desde: "2026-11-20", hasta: "2026-12-30" }, { desde: "2025-01-01", hasta: "2025-01-10" }, { desde: "x&y=1", hasta: "2026-11-10" }]) {
+        await metricasPublicacionesAction({ cuentaMlId: CUENTA, items, periodo });
+        expect(ml.visitas).toHaveBeenLastCalledWith("MCO1", "token", 7, undefined);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("como máximo 10 publicaciones por pedido y descarta ids mal formados", async () => {

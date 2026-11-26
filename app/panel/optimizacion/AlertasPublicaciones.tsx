@@ -13,13 +13,16 @@ import styles from "./page.module.css";
 // Publicaciones). Se piden DESPUÉS de pintar la lista, para no frenarla.
 // Solo lectura: cada tarjeta es un enlace a la lista filtrada.
 
-function href(cuentaMlId: string, clave: ClaveAlerta | null): string {
+// `periodo`: parámetros de URL del período elegido (periodo/dias/desde/hasta),
+// para que la tarjeta y «Quitar filtro» no lo pierdan.
+function href(cuentaMlId: string, clave: ClaveAlerta | null, periodo: Record<string, string>): string {
   const q = new URLSearchParams({ cuenta: cuentaMlId });
+  for (const [k, v] of Object.entries(periodo)) q.set(k, v);
   if (clave) q.set("alerta", clave);
   return `/panel/optimizacion?${q.toString()}`;
 }
 
-export function AlertasPublicaciones({ cuentaMlId, idioma, activa }: { cuentaMlId: string; idioma: string; activa: ClaveAlerta | null }) {
+export function AlertasPublicaciones({ cuentaMlId, idioma, activa, periodo = {} }: { cuentaMlId: string; idioma: string; activa: ClaveAlerta | null; periodo?: Record<string, string> }) {
   const [alertas, setAlertas] = useState<AlertaPublicaciones[] | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [desborda, setDesborda] = useState(false);
@@ -79,7 +82,7 @@ export function AlertasPublicaciones({ cuentaMlId, idioma, activa }: { cuentaMlI
               <Link
                 key={a.clave}
                 scroll={false}
-                href={href(cuentaMlId, a.clave)}
+                href={href(cuentaMlId, a.clave, periodo)}
                 className={styles.alertaTarjeta}
                 aria-current={activa === a.clave ? "page" : undefined}
               >
@@ -102,7 +105,7 @@ export function AlertasPublicaciones({ cuentaMlId, idioma, activa }: { cuentaMlI
       {activa ? (
         <p className={styles.nota}>
           {`Mostrando: ${tituloAlerta(activa)} · `}
-          <Link scroll={false} href={href(cuentaMlId, null)}>
+          <Link scroll={false} href={href(cuentaMlId, null, periodo)}>
             Quitar filtro
           </Link>
         </p>

@@ -34,6 +34,31 @@ describe("leerModeracionItem", () => {
     });
     expect(r).toEqual({ motivo: "Infringe políticas", solucion: "Edita el título", fecha: "2026-11-20T10:00:00Z" });
   });
+  it("arreglo en la raíz: ejemplo de la doc (POOR_QUALITY_THUMBNAIL con REASON y REMEDY)", () => {
+    const r = leerModeracionItem([
+      {
+        name: "POOR_QUALITY_THUMBNAIL",
+        id: "ab12cd34",
+        date_created: "2026-11-20T10:00:00.000Z",
+        evidences: [],
+        wordings: [
+          { type: "REASON", value: "La imagen principal no cumple con la calidad requerida." },
+          { type: "REMEDY", value: "Sube una imagen nítida, con fondo blanco y sin textos." },
+        ],
+      },
+    ]);
+    expect(r).toEqual({
+      motivo: "La imagen principal no cumple con la calidad requerida.",
+      solucion: "Sube una imagen nítida, con fondo blanco y sin textos.",
+      fecha: "2026-11-20T10:00:00.000Z",
+    });
+  });
+  it("arreglo en la raíz: DENYLIST solo con REASON", () => {
+    const r = leerModeracionItem([
+      { name: "DENYLIST", id: "ef56", date_created: "2026-11-21T09:00:00.000Z", evidences: [], wordings: [{ type: "REASON", value: "Producto prohibido en Mercado Libre." }] },
+    ]);
+    expect(r).toEqual({ motivo: "Producto prohibido en Mercado Libre.", solucion: null, fecha: "2026-11-21T09:00:00.000Z" });
+  });
   it("sin REMEDY deja solo el motivo", () => {
     expect(leerModeracionItem({ moderations: [{ wordings: [{ type: "REASON", value: "Motivo" }] }] })).toEqual({ motivo: "Motivo", solucion: null, fecha: null });
   });

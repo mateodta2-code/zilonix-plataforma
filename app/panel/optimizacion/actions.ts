@@ -55,7 +55,7 @@ import { itemNoModificablePorRevision } from "@/lib/ml/publicar-reglas";
 import { alertasComparacion, elegirCompetidores, type FilaComparacion } from "@/lib/optimizacion/competencia";
 import { leerPrecioEscrito } from "@/lib/optimizacion/simulador";
 import { diagnosticarPublicacion } from "@/lib/optimizacion/diagnostico";
-import { leerDiasMetricas } from "@/lib/optimizacion/textos";
+import { hastaExclusivoIso, leerPeriodoLista } from "@/lib/optimizacion/periodoLista";
 import { cambioEsDeLaPublicacion, compactarFotos, diaDelCambio, crearNotaBitacora, MARCA_FOTO_IA, registrarCambioOptimizacion, guardarRevisionCambio } from "@/lib/optimizacion/bitacora";
 import { leerFechaNota, leerResultadoRevision, limpiarTextoBitacora } from "@/lib/optimizacion/bitacoraResultado";
 import { hoyBogota } from "@/lib/publicidad/plan";
@@ -146,15 +146,21 @@ export type MetricasPublicacion = {
 
 export type ResultadoMetricas = { ok: true; metricas: Record<string, MetricasPublicacion> } | { ok: false; aviso: string };
 
-// Visitas de los últimos N días (7, 14, 30 o 90; cualquier otro valor
-// cae a 7), calidad y competencia de hasta 10 publicaciones. Solo
-// lectura. Una publicación que falla queda con sus datos en null.
+// Visitas del período (7, 14, 30 o 90 días; «hoy»; o un rango desde–hasta),
+// calidad y competencia de hasta 10 publicaciones. Solo lectura. El período
+// se vuelve a validar acá (leerPeriodoLista): un valor raro cae a 7 días,
+// nunca se confía en el cliente. Una publicación que falla queda con sus
+// datos en null.
 export async function metricasPublicacionesAction(entrada: {
   cuentaMlId: string;
   items: { id: string; catalogo: boolean }[];
   dias?: number;
+  periodo?: { desde?: string; hasta?: string };
 }): Promise<ResultadoMetricas> {
-  const dias = leerDiasMetricas(entrada.dias);
+  const periodo = leerPeriodoLista({ dias: entrada.dias, desde: entrada.periodo?.desde, hasta: entrada.periodo?.hasta }, new Date());
+  // Los 7/14/30/90 de siempre piden igual que antes (sin ending); «hoy» y
+  // el rango terminan el día siguiente al «hasta» (ending es exclusivo).
+  const ending = periodo.clave === "hoy" || periodo.clave === "rango" ? hastaExclusivoIso(periodo) : undefined;
   const ctx = await contexto("consultar");
   if (!ctx) return { ok: false, aviso: "Tu rol no tiene acceso a Optimización." };
   const cuenta = await cuentaDeLaEmpresa(ctx.empresaId, entrada.cuentaMlId);
@@ -173,7 +179,7 @@ export async function metricasPublicacionesAction(entrada: {
   const metricas: Record<string, MetricasPublicacion> = {};
   async function una(item: { id: string; catalogo: boolean }) {
     const seguro = <T,>(p: Promise<T | null>) => p.catch(() => null);
-    const visitas = await seguro(visitasItemMl(item.id, token, dias));
+    const visitas = await seguro(visitasItemMl(item.id, token, periodo.dias, ending));
     const calidad = await seguro(calidadItemMl(item.id, token));
     const competencia = item.catalogo ? await seguro(competenciaItemMl(item.id, token, cuenta!.siteId)) : null;
     metricas[item.id] = { visitas, calidad, competencia };
