@@ -21,6 +21,8 @@ export type FilaBitacoraVista = {
   usuario: string;
   estado: "midiendo" | "listo" | "revisado" | "sin_revisar";
   faltanDias: number;
+  // Nota de accionable: se mide a 14 días (el servidor ya calculó estado y faltanDias).
+  accionable?: boolean;
   hrefDetalle: string;
 };
 
@@ -66,7 +68,7 @@ function ResultadoCelda({ fila }: { fila: FilaBitacoraVista }) {
   };
   return (
     <div className={styles.resultado}>
-      <strong>Resultado al día 8 (7 días antes vs. 7 días después)</strong>
+      <strong>{resultado.dias === 14 ? "Resultado a 14 días (14 días antes vs. 14 días después)" : "Resultado al día 8 (7 días antes vs. 7 días después)"}</strong>
       <span>{linea("Visitas", resultado.antes.visitas, resultado.despues.visitas, true)}</span>
       <span>{linea("Ventas", resultado.antes.ventas, resultado.despues.ventas, true)}</span>
       <span>{linea("Conversión", resultado.antes.conversion === null ? null : `${resultado.antes.conversion} %`, resultado.despues.conversion === null ? null : `${resultado.despues.conversion} %`, false)}</span>
@@ -89,6 +91,7 @@ export function TablaBitacoraGeneral({ filas }: { filas: FilaBitacoraVista[] }) 
           <CeldaTabla>{f.cuenta}</CeldaTabla>
           <CeldaTabla>
             <strong>{f.rotulo}</strong>
+            {f.accionable ? <Chip estado="neutro">Accionable</Chip> : null}
             <div>{f.queCambio}</div>
           </CeldaTabla>
           <CeldaTabla>{f.usuario}</CeldaTabla>

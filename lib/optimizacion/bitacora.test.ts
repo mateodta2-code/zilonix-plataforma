@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACCIONES_BITACORA, leerFechaNota, leerResultadoRevision, limpiarTextoBitacora, listoParaRevisar, resultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import { ACCIONES_BITACORA, leerFechaNota, leerResultadoRevision, limpiarTextoBitacora, listoParaRevisar, resultadoCambio, esNotaAccionable, PREFIJO_ACCIONABLE, DIAS_MEDICION_ACCIONABLE, diasMedicionDe, diasAvisoDe } from "@/lib/optimizacion/bitacoraResultado";
 import type { LineaVendida } from "@/lib/optimizacion/calculos";
 
 const linea = (dia: string, valor: string, cantidad = 1): LineaVendida => ({ pedidoId: `p-${dia}`, dia, cantidad, valor, valida: true, costos: null });
@@ -64,5 +64,40 @@ describe("bitácora: revisión y notas", () => {
     expect(leerFechaNota("2026-02-30", "2026-11-20")).toBeNull();
     expect(leerFechaNota("2026-01-01", "2026-11-20")).toBeNull();
     expect(leerFechaNota(42, "2026-11-20")).toBeNull();
+  });
+});
+
+describe("accionable a 14 días", () => {
+  const base = { lineas: [], publicidad: [], visitasPorDia: null, visitasDesde: "2026-01-01", conFinanzas: false };
+  it("esNotaAccionable distingue por el prefijo", () => {
+    expect(esNotaAccionable(`${PREFIJO_ACCIONABLE}subir fotos`)).toBe(true);
+    expect(esNotaAccionable("Cambié el precio")).toBe(false);
+    expect(esNotaAccionable(`  ${PREFIJO_ACCIONABLE}x`)).toBe(false);
+    expect(esNotaAccionable(null)).toBe(false);
+    expect(diasMedicionDe(`${PREFIJO_ACCIONABLE}x`)).toBe(14);
+    expect(diasMedicionDe("otra nota")).toBe(7);
+    expect(diasAvisoDe(`${PREFIJO_ACCIONABLE}x`)).toBe(21);
+  });
+  it("día 13 sigue midiendo y el día 14 terminado queda listo", () => {
+    // día marcado 2026-11-01: la ventana «después» termina el 2026-11-14.
+    expect(resultadoCambio("2026-11-01", "2026-11-13", base, DIAS_MEDICION_ACCIONABLE)).toEqual({ estado: "midiendo", faltanDias: 2 });
+    expect(resultadoCambio("2026-11-01", "2026-11-14", base, DIAS_MEDICION_ACCIONABLE)).toEqual({ estado: "midiendo", faltanDias: 1 });
+    const r = resultadoCambio("2026-11-01", "2026-11-15", base, DIAS_MEDICION_ACCIONABLE);
+    expect(r.estado).toBe("listo");
+    if (r.estado === "listo") expect([r.desde, r.hasta]).toEqual(["2026-10-18", "2026-11-14"]);
+  });
+  it("una nota normal sigue a 7 días", () => {
+    expect(resultadoCambio("2026-11-01", "2026-11-08", base).estado).toBe("listo");
+  });
+  it("visitas incompletas si la ventana «antes» cae fuera del tope", () => {
+    const r = resultadoCambio("2026-11-01", "2026-11-15", { ...base, visitasPorDia: new Map(), visitasDesde: "2026-10-25" }, 14);
+    if (r.estado !== "listo") throw new Error("debía estar listo");
+    expect(r.antes.visitas).toBeNull();
+  });
+  it("listoParaRevisar con 14 y aviso a 21", () => {
+    expect(listoParaRevisar("2026-11-01", "2026-11-14", 14, 21)).toBe(false);
+    expect(listoParaRevisar("2026-11-01", "2026-11-15", 14, 21)).toBe(true);
+    expect(listoParaRevisar("2026-11-01", "2026-11-22", 14, 21)).toBe(true);
+    expect(listoParaRevisar("2026-11-01", "2026-11-23", 14, 21)).toBe(false);
   });
 });

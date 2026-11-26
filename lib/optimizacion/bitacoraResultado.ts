@@ -8,6 +8,25 @@ export const DIAS_MEDICION = 7;
 // Hasta cuándo un cambio sale como «listo para revisar» en la lista.
 export const DIAS_AVISO_REVISION = 14;
 
+// Accionables marcados «hecho» desde Rendimiento (#707): se guardan como nota
+// de bitácora con este prefijo y se miden a 14 días (no a 7).
+export const PREFIJO_ACCIONABLE = "Accionable hecho: ";
+export const DIAS_MEDICION_ACCIONABLE = 14;
+export const DIAS_AVISO_REVISION_ACCIONABLE = 21;
+
+export function esNotaAccionable(texto: string | null | undefined): boolean {
+  return typeof texto === "string" && texto.startsWith(PREFIJO_ACCIONABLE);
+}
+
+// Días de medición de un cambio según su nota (las que no son de accionable siguen a 7).
+export function diasMedicionDe(texto: string | null | undefined): number {
+  return esNotaAccionable(texto) ? DIAS_MEDICION_ACCIONABLE : DIAS_MEDICION;
+}
+
+export function diasAvisoDe(texto: string | null | undefined): number {
+  return esNotaAccionable(texto) ? DIAS_AVISO_REVISION_ACCIONABLE : DIAS_AVISO_REVISION;
+}
+
 export const ACCIONES_BITACORA: Record<string, string> = {
   cambiar_precio_publicacion: "Precio",
   cambiar_titulo_publicacion: "Título",
@@ -29,14 +48,15 @@ export type ResultadoCambio =
 export function resultadoCambio(
   dia: string,
   hoy: string,
-  base: { lineas: LineaVendida[]; publicidad: DiaPublicidad[]; visitasPorDia: Map<string, number> | null; visitasDesde: string; conFinanzas: boolean }
+  base: { lineas: LineaVendida[]; publicidad: DiaPublicidad[]; visitasPorDia: Map<string, number> | null; visitasDesde: string; conFinanzas: boolean },
+  dias: number = DIAS_MEDICION
 ): ResultadoCambio {
-  const finDespues = restarDiasIso(dia, -(DIAS_MEDICION - 1));
+  const finDespues = restarDiasIso(dia, -(dias - 1));
   if (finDespues >= hoy) {
     const faltanDias = Math.round((Date.parse(`${finDespues}T00:00:00Z`) - Date.parse(`${hoy}T00:00:00Z`)) / 86_400_000) + 1;
     return { estado: "midiendo", faltanDias };
   }
-  const desdeAntes = restarDiasIso(dia, DIAS_MEDICION);
+  const desdeAntes = restarDiasIso(dia, dias);
   const hastaAntes = restarDiasIso(dia, 1);
   const comun = { lineas: base.lineas, publicidad: base.publicidad, visitasPorDia: base.visitasPorDia, conFinanzas: base.conFinanzas };
   return {
@@ -69,8 +89,8 @@ export function limpiarTextoBitacora(valor: unknown, largo = LARGO_NOTA): string
 // Un cambio está listo para revisar cuando terminó su semana de medición y
 // no tiene más de 14 días. En días de calendario de Bogotá, igual que el
 // resultado del detalle.
-export function listoParaRevisar(dia: string, hoy: string): boolean {
-  return restarDiasIso(dia, -(DIAS_MEDICION - 1)) < hoy && dia >= restarDiasIso(hoy, DIAS_AVISO_REVISION);
+export function listoParaRevisar(dia: string, hoy: string, dias: number = DIAS_MEDICION, diasAviso: number = DIAS_AVISO_REVISION): boolean {
+  return restarDiasIso(dia, -(dias - 1)) < hoy && dia >= restarDiasIso(hoy, diasAviso);
 }
 
 // Fecha de una nota («YYYY-MM-DD» del formulario): un día real, no en el

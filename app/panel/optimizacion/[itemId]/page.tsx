@@ -27,7 +27,7 @@ import { rotuloTipoPublicacion } from "@/lib/optimizacion/textos";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { hoyBogota, restarDiasIso } from "@/lib/publicidad/plan";
 import { leerCambiosPublicacion, type CambioBitacora } from "@/lib/optimizacion/bitacora";
-import { resultadoCambio, type ResultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
+import { diasMedicionDe, resultadoCambio, type ResultadoCambio } from "@/lib/optimizacion/bitacoraResultado";
 import { tienePermiso } from "@/lib/roles-plantillas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import styles from "../page.module.css";
@@ -154,7 +154,7 @@ export default async function DetalleOptimizacionPage({
   });
   const hoy = hoyBogota(ahora);
   const resultados = new Map<string, ResultadoCambio>(
-    cambios.map((c) => [c.ref, resultadoCambio(c.dia, hoy, { lineas: datos!.lineas, publicidad: datos!.publicidad, visitasPorDia: datos!.visitasPorDia, visitasDesde: datos!.visitasDesde, conFinanzas })])
+    cambios.map((c) => [c.ref, resultadoCambio(c.dia, hoy, { lineas: datos!.lineas, publicidad: datos!.publicidad, visitasPorDia: datos!.visitasPorDia, visitasDesde: datos!.visitasDesde, conFinanzas }, diasMedicionDe(c.origen === "nota" ? c.detalle : null))])
   );
   // Fase 3 — edición: datos frescos de ML (ventas, variantes, fotos,
   // automatización y precio para ganar) y la base del simulador con los
