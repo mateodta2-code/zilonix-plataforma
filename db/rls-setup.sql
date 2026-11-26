@@ -1184,21 +1184,32 @@ CREATE POLICY bodega3pl_autorregistro ON bodegas_3pl FOR INSERT TO app_user
 -- Primer admin de una bodega autorregistrada: solo ella misma, solo admin y
 -- solo mientras la bodega no tenga ningún miembro (nadie se hace admin de una
 -- bodega ajena ni agrega un segundo admin por esta vía).
+-- La comprobación lee bodegas_3pl y miembros_bodega_3pl. Hecha como subconsulta
+-- dentro de la política de miembros_bodega_3pl, Postgres detecta recursión
+-- infinita (la propia tabla, y bodega3pl_ver que vuelve a miembros). Por eso va
+-- en una función SECURITY DEFINER mínima: solo lectura, devuelve un booleano,
+-- search_path fijo y sin GRANT a PUBLIC (mismo patrón que las funciones de
+-- superadmin_*; el dueño no queda sujeto a las políticas).
+CREATE OR REPLACE FUNCTION bodega3pl_autorregistro_sin_miembros(p_bodega uuid, p_usuario uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT EXISTS (
+      SELECT 1 FROM bodegas_3pl b
+      WHERE b.id = p_bodega AND b.origen = 'autorregistro' AND b.creado_por = p_usuario
+    )
+    AND NOT EXISTS (SELECT 1 FROM miembros_bodega_3pl m WHERE m.bodega_id = p_bodega)
+$fn$;
+REVOKE ALL ON FUNCTION bodega3pl_autorregistro_sin_miembros(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION bodega3pl_autorregistro_sin_miembros(uuid, uuid) TO app_user;
+
 DROP POLICY IF EXISTS miembro3pl_admin_autorregistro ON miembros_bodega_3pl;
 CREATE POLICY miembro3pl_admin_autorregistro ON miembros_bodega_3pl FOR INSERT TO app_user
   WITH CHECK (
     rol = 'admin_bodega'
     AND usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
     AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
-    AND EXISTS (
-      SELECT 1 FROM bodegas_3pl b
-      WHERE b.id = miembros_bodega_3pl.bodega_id
-        AND b.origen = 'autorregistro'
-        AND b.creado_por = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM miembros_bodega_3pl m WHERE m.bodega_id = miembros_bodega_3pl.bodega_id
-    )
+    AND bodega3pl_autorregistro_sin_miembros(bodega_id, usuario_id)
   );
 
 -- perfiles_domiciliario: cada persona solo ve, crea y edita (nombre, teléfono,
