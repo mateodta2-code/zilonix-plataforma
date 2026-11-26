@@ -39,6 +39,7 @@ import {
   PATRON_ID_PRODUCTO_O_ITEM,
   resolverCategoria,
   salirDePromocionMl,
+  visitasItemMl,
 } from "./cliente";
 
 function respuestaJson(data: unknown, status = 200) {
@@ -1339,5 +1340,37 @@ describe("actualizarNombreFamiliaMl (título de «User Products», 22-nov)", () 
     const { actualizarNombreFamiliaMl } = await import("./cliente");
     await expect(actualizarNombreFamiliaMl("../items/MCO1", "token", "x")).rejects.toThrow();
     expect(fetchFalso).not.toHaveBeenCalled();
+  });
+});
+
+describe("lib/ml/cliente — visitasItemMl con ending (Optimización, período Hoy y rango)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function urlPedida(fetchMock: ReturnType<typeof vi.fn>): string {
+    return String(fetchMock.mock.calls[0][0]);
+  }
+
+  it("sin ending arma la misma URL de siempre", async () => {
+    const fetchMock = vi.fn(async () => respuestaJson({ total_visits: 12 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await visitasItemMl("MCO123", "token", 7)).toBe(12);
+    expect(urlPedida(fetchMock)).toMatch(/\/items\/MCO123\/visits\/time_window\?last=7&unit=day$/);
+  });
+
+  it("con ending agrega &ending= (exclusivo, tal cual lo recibe)", async () => {
+    const fetchMock = vi.fn(async () => respuestaJson({ total_visits: 3 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await visitasItemMl("MCO123", "token", 15, "2026-11-16")).toBe(3);
+    expect(urlPedida(fetchMock)).toMatch(/\?last=15&unit=day&ending=2026-11-16$/);
+  });
+
+  it("un ending con formato raro lanza y nunca llama a fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(visitasItemMl("MCO123", "token", 7, "2026-11-16&x=1")).rejects.toThrow();
+    await expect(visitasItemMl("MCO123", "token", 7, "mañana")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

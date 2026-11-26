@@ -7,6 +7,7 @@ import { BarraCarga } from "@/components/marco/BarraCarga";
 import { Chip } from "@/components/marco/Chip";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { formatearMoneda, formatearNumero } from "@/lib/ml/sitios";
+import { rotuloCortoPeriodo, type PeriodoLista } from "@/lib/optimizacion/periodoLista";
 import { conversion, rotuloCompetencia, rotuloEstadoPublicacion, rotuloTipoPublicacion, tonoCalidad } from "@/lib/optimizacion/textos";
 import { cambiarEstadoPublicacionAction, metricasPublicacionesAction, type MetricasPublicacion } from "./actions";
 import { DesgloseCompetencia } from "./DesgloseCompetencia";
@@ -31,15 +32,16 @@ export type FilaTablaOptimizacion = {
 
 const LOTE = 10;
 
-function encabezados(dias: number) {
+function encabezados(periodo: PeriodoLista) {
+  const corto = rotuloCortoPeriodo(periodo);
   return [
     "",
     "Publicación",
     { clave: "precio", contenido: "Precio", numerica: true },
     "Tipo",
     "Envío",
-    { clave: "visitas", contenido: `Visitas ${dias} d`, numerica: true },
-    { clave: "ventas", contenido: `Ventas ${dias} d`, numerica: true },
+    { clave: "visitas", contenido: `Visitas ${corto}`, numerica: true },
+    { clave: "ventas", contenido: `Ventas ${corto}`, numerica: true },
     { clave: "conversion", contenido: "Conversión", numerica: true },
     "Calidad",
     "Competencia",
@@ -53,7 +55,7 @@ export function TablaOptimizacion({
   siteId,
   idioma,
   puedeModificar,
-  dias,
+  periodo,
   paraRevisar = [],
 }: {
   filas: FilaTablaOptimizacion[];
@@ -61,7 +63,7 @@ export function TablaOptimizacion({
   siteId: string;
   idioma: string;
   puedeModificar: boolean;
-  dias: number;
+  periodo: PeriodoLista;
   // Publicaciones con un cambio que ya cumplió 7 días (bitácora).
   paraRevisar?: string[];
 }) {
@@ -88,7 +90,12 @@ export function TablaOptimizacion({
         if (cancelado) return;
         const lote = filas.slice(i, i + LOTE).map((f) => ({ id: f.id, catalogo: f.catalogo }));
         try {
-          const r = await metricasPublicacionesAction({ cuentaMlId, items: lote, dias });
+          const r = await metricasPublicacionesAction({
+            cuentaMlId,
+            items: lote,
+            // Hoy y rango van con fechas; los 7/14/30/90 de siempre, con días.
+            ...(periodo.clave === "hoy" || periodo.clave === "rango" ? { periodo: { desde: periodo.desde, hasta: periodo.hasta } } : { dias: periodo.dias }),
+          });
           if (cancelado) return;
           if (!r.ok) {
             setAvisoMetricas(r.aviso);
@@ -106,7 +113,7 @@ export function TablaOptimizacion({
     return () => {
       cancelado = true;
     };
-  }, [filas, cuentaMlId, dias]);
+  }, [filas, cuentaMlId, periodo.clave, periodo.desde, periodo.hasta, periodo.dias]);
 
   const plata = (valor: number | null) => (valor === null ? "—" : formatearMoneda(valor, siteId));
 
@@ -133,7 +140,7 @@ export function TablaOptimizacion({
         ariaLabel="Progreso de visitas, calidad y competencia"
         sticky={false}
       />
-      <Tabla encabezados={encabezados(dias)} scroll>
+      <Tabla encabezados={encabezados(periodo)} scroll>
         {filas.map((fila) => {
           const m = metricas[fila.id];
           const visitas = m ? m.visitas : undefined;
@@ -247,7 +254,7 @@ export function TablaOptimizacion({
               </FilaTabla>
               {abiertaEsta ? (
                 <FilaTabla id={`desglose-${fila.id}`}>
-                  <CeldaTabla colSpan={encabezados(dias).length}>
+                  <CeldaTabla colSpan={encabezados(periodo).length}>
                     <div className={styles.desglose}>
                       <p className={styles.seccion}>Competencia del mismo producto</p>
                       <DesgloseCompetencia
@@ -284,6 +291,7 @@ export function TablaOptimizacion({
           );
         })}
       </Tabla>
+      {periodo.clave === "hoy" ? <p className={styles.nota}>Las visitas de hoy pueden tardar unas horas en aparecer en Mercado Libre.</p> : null}
     </>
   );
 }

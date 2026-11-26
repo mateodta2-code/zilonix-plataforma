@@ -2089,11 +2089,14 @@ export async function visitasCuentaMl(vendedorId: string, token: string, desde: 
   }
 }
 
-// Visitas de los últimos `dias` días de una publicación.
-export async function visitasItemMl(itemId: string, token: string, dias = 7): Promise<number | null> {
+// Visitas de los últimos `dias` días de una publicación. Con `ending`
+// (YYYY-MM-DD, EXCLUSIVO según la doc: last=2&ending=2021-08-06 devuelve
+// los días 04 y 05) la ventana termina ahí; sin él, termina hoy.
+export async function visitasItemMl(itemId: string, token: string, dias = 7, ending?: string): Promise<number | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  if (ending !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(ending)) throw new Error("ending inválido");
   const resp = await pedirLecturaMl<{ total_visits?: unknown }>(`/items/${itemId}/visits/time_window`, token, {
-    query: `?last=${Math.min(Math.max(dias, 1), 150)}&unit=day`,
+    query: `?last=${Math.min(Math.max(dias, 1), 150)}&unit=day${ending ? `&ending=${ending}` : ""}`,
   });
   if (!resp.ok) return null;
   return numeroONull(resp.data.total_visits);
