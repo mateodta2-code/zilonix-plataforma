@@ -20,6 +20,9 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch: {}
 
+# El job no usa el token de GitHub.
+permissions: {}
+
 concurrency:
   group: sincronizar-falabella-staging
   cancel-in-progress: false
@@ -27,15 +30,14 @@ concurrency:
 jobs:
   sincronizar:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Importar pedidos Falabella en staging
         run: |
           set -euo pipefail
           cuerpo=$(curl -sf -X POST "https://web-staging-d979.up.railway.app/api/trabajos/falabella" \
             -H "x-falabella-trabajador-secret: ${{ secrets.FALABELLA_TRABAJADOR_SECRET_STAGING }}" \
-            --max-time 300)
-          echo "$cuerpo"
+            --max-time 240)
           fallidas=$(printf '%s' "$cuerpo" | sed -n 's/.*"fallidas":\([0-9][0-9]*\).*/\1/p')
           if [ -z "$fallidas" ]; then
             echo "La respuesta no trajo el resumen."
@@ -44,9 +46,60 @@ jobs:
           if [ "$fallidas" != "0" ]; then
             echo "::warning::${fallidas} cuenta(s) fallaron. El detalle quedó en auditoria."
           fi
+          echo "Sincronización terminada. Cuentas fallidas: ${fallidas}"
 
 # Producción, el sábado 28 con Mateo. Mismo paso, contra el dominio y
 # el secreto de producción, nunca este URL de staging:
 # curl -sf -X POST "https://<dominio-produccion>/api/trabajos/falabella" \
 #   -H "x-falabella-trabajador-secret: ${{ secrets.FALABELLA_TRABAJADOR_SECRET_PRODUCCION }}" \
-#   --max-time 300
+#   --max-time 240
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
