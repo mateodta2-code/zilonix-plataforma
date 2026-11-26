@@ -22,7 +22,37 @@ describe("período del detalle", () => {
   it("lista blanca: lo desconocido cae a 30 días", () => {
     expect(resolverPeriodoDetalle("2020-01", AHORA).clave).toBe("30");
     expect(resolverPeriodoDetalle("drop", AHORA).clave).toBe("30");
-    expect(opcionesPeriodo(AHORA).map((o) => o.clave)).toEqual(["7", "30", "90", "2026-11", "2026-10", "2026-09", "2026-08"]);
+  });
+
+  it("hoy: un solo día, contra ayer", () => {
+    expect(resolverPeriodoDetalle("hoy", AHORA)).toMatchObject({ clave: "hoy", desde: "2026-11-17", hasta: "2026-11-17", dias: 1, anteriorDesde: "2026-11-16", anteriorHasta: "2026-11-16" });
+  });
+
+  it("personalizado: rango, invertido y anterior del mismo largo", () => {
+    expect(resolverPeriodoDetalle("personalizado", AHORA, { desde: "2026-11-10", hasta: "2026-11-14" })).toMatchObject({
+      clave: "personalizado",
+      desde: "2026-11-10",
+      hasta: "2026-11-14",
+      dias: 5,
+      anteriorDesde: "2026-11-05",
+      anteriorHasta: "2026-11-09",
+    });
+    expect(resolverPeriodoDetalle("personalizado", AHORA, { desde: "2026-11-14", hasta: "2026-11-10" })).toMatchObject({ desde: "2026-11-10", hasta: "2026-11-14" });
+    // Justo en el tope de 150 días.
+    expect(resolverPeriodoDetalle("personalizado", AHORA, { desde: "2026-06-21", hasta: "2026-11-17" }).clave).toBe("personalizado");
+  });
+
+  it("personalizado inválido cae al período por defecto, sin lanzar", () => {
+    const malos: [unknown, unknown][] = [
+      [undefined, undefined],
+      ["basura", "2026-11-10"],
+      ["2026-02-31", "2026-11-10"],
+      ["2026-11-10", "2026-11-18"], // futuro
+      ["2026-06-20", "2026-11-17"], // más de 150 días
+      [["2026-11-10"], 5],
+    ];
+    for (const [desde, hasta] of malos) expect(resolverPeriodoDetalle("personalizado", AHORA, { desde, hasta }).clave).toBe("30");
+    expect(opcionesPeriodo(AHORA).map((o) => o.clave)).toEqual(["hoy", "7", "30", "90", "2026-11", "2026-10", "2026-09", "2026-08", "personalizado"]);
   });
 });
 

@@ -21,6 +21,8 @@ const ml = vi.hoisted(() => ({
   atributos: vi.fn(),
   tendencias: vi.fn(),
   reputacion: vi.fn(),
+  moderacion: vi.fn(),
+  alertas: vi.fn(),
 }));
 const auditorias = vi.hoisted(() => [] as unknown[]);
 const ia = vi.hoisted(() => ({ conexion: vi.fn(), descargar: vi.fn(), generar: vi.fn(), subir: vi.fn(), texto: vi.fn(), cloudinary: { configurado: true } }));
@@ -97,8 +99,10 @@ vi.mock("@/lib/ml/cliente", async () => {
     leerAtributosItemMl: ml.atributos,
     tendenciasPorNivelMl: ml.tendencias,
     reputacionVendedorMl: ml.reputacion,
+    ultimaModeracionItemMl: ml.moderacion,
   };
 });
+vi.mock("@/lib/optimizacion/alertasDatos", () => ({ leerAlertasPublicaciones: ml.alertas }));
 
 const CUENTA = "11111111-1111-1111-1111-111111111111";
 
@@ -112,6 +116,8 @@ import {
   generarImagenIAAction,
   guardarNotaBitacoraAction,
   mejorarTituloIAAction,
+  alertasPublicacionesAction,
+  moderacionPublicacionAction,
   metricasPublicacionesAction,
   revisarCambioAction,
   proponerContenidoIAAction,
@@ -737,5 +743,46 @@ describe("mejorarTituloIAAction (solo lectura en Mercado Libre)", () => {
     estado.conPermiso = false;
     expect(await mejorarTituloIAAction(ENTRADA)).toMatchObject({ ok: false });
     expect(ia.texto).not.toHaveBeenCalled();
+  });
+});
+
+describe("alertas de publicaciones (solo lectura)", () => {
+  beforeEach(() => {
+    estado.conPermiso = true;
+    estado.cuentaExiste = true;
+    estado.permisosPedidos = [];
+    ml.alertas.mockReset().mockResolvedValue({ alertas: [], ids: { moderadas: [], competencia: [], precio_alto: ["MCO1"] } });
+    ml.moderacion.mockReset().mockResolvedValue({ motivo: "Motivo", solucion: "Solución", fecha: null });
+  });
+
+  it("pide consultar inventario y devuelve alertas con la cuenta de la empresa", async () => {
+    const r = await alertasPublicacionesAction({ cuentaMlId: CUENTA });
+    expect(r.ok).toBe(true);
+    expect(estado.permisosPedidos).toContain("inventario.consultar");
+    expect(ml.alertas).toHaveBeenCalledWith(expect.objectContaining({ cuentaIdExterna: "123456", siteId: "MCO" }), "token");
+  });
+  it("sin permiso, cuenta ajena o id inválido: no llama a Mercado Libre", async () => {
+    estado.conPermiso = false;
+    expect((await alertasPublicacionesAction({ cuentaMlId: CUENTA })).ok).toBe(false);
+    estado.conPermiso = true;
+    estado.cuentaExiste = false;
+    expect((await alertasPublicacionesAction({ cuentaMlId: CUENTA })).ok).toBe(false);
+    estado.cuentaExiste = true;
+    expect((await alertasPublicacionesAction({ cuentaMlId: "x" })).ok).toBe(false);
+    expect(ml.alertas).not.toHaveBeenCalled();
+  });
+  it("si falla la lectura devuelve un aviso, no una excepción", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    ml.alertas.mockRejectedValue(new Error("boom"));
+    expect((await alertasPublicacionesAction({ cuentaMlId: CUENTA })).ok).toBe(false);
+  });
+  it("moderación: una llamada, valida el id y los permisos", async () => {
+    const r = await moderacionPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO123" });
+    expect(r).toEqual({ ok: true, moderacion: { motivo: "Motivo", solucion: "Solución", fecha: null } });
+    expect(ml.moderacion).toHaveBeenCalledTimes(1);
+    expect((await moderacionPublicacionAction({ cuentaMlId: CUENTA, itemId: "../x" })).ok).toBe(false);
+    estado.conPermiso = false;
+    expect((await moderacionPublicacionAction({ cuentaMlId: CUENTA, itemId: "MCO123" })).ok).toBe(false);
+    expect(ml.moderacion).toHaveBeenCalledTimes(1);
   });
 });

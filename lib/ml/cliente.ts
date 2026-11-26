@@ -1864,7 +1864,7 @@ export async function responderPreguntaMl(preguntaId: string, texto: string, tok
 //   buckets[].variables[] con status y title). /items/{id}/health da 404.
 // - Competencia: /items/{id}/price_to_win?siteId=&version=v2 (status).
 
-export type EstadoListadoMl = "active" | "paused";
+export type EstadoListadoMl = "active" | "paused" | "under_review" | "pending";
 
 export async function listarItemsVendedorMl(
   vendedorId: string,
@@ -2134,17 +2134,44 @@ export async function calidadItemMl(itemId: string, token: string): Promise<Cali
   return leerCalidadItem(resp.data);
 }
 
-export type CompetenciaItemMl = { estado: string | null; precioParaGanar: number | null };
+export type BoostCompetenciaMl = { id: string; estado: string; descripcion: string | null };
+
+export type CompetenciaItemMl = {
+  estado: string | null;
+  precioParaGanar: number | null;
+  // opportunity / boosted / not_boosted / not_apply, tal cual los da ML.
+  boosts: BoostCompetenciaMl[];
+  // Por qué no compite (campo `reason`), si ML lo trae.
+  motivo: string | null;
+};
+
+// Pura: lee la respuesta de price_to_win?version=v2 sin inventar nada.
+export function leerCompetenciaItem(data: unknown): CompetenciaItemMl {
+  const d = (data ?? {}) as { status?: unknown; price_to_win?: unknown; boosts?: unknown; reason?: unknown };
+  const boosts: BoostCompetenciaMl[] = [];
+  for (const fila of Array.isArray(d.boosts) ? d.boosts : []) {
+    const b = fila as { id?: unknown; status?: unknown; description?: unknown };
+    if (typeof b?.id !== "string" || typeof b?.status !== "string") continue;
+    boosts.push({ id: b.id, estado: b.status, descripcion: typeof b.description === "string" && b.description.trim() ? b.description.trim() : null });
+  }
+  const motivo = Array.isArray(d.reason) ? d.reason.find((r) => typeof r === "string") : d.reason;
+  return {
+    estado: typeof d.status === "string" ? d.status : null,
+    precioParaGanar: numeroONull(d.price_to_win),
+    boosts,
+    motivo: typeof motivo === "string" && motivo.trim() ? motivo.trim() : null,
+  };
+}
 
 // Solo tiene sentido para publicaciones de catálogo.
 export async function competenciaItemMl(itemId: string, token: string, siteId: string): Promise<CompetenciaItemMl | null> {
   exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
   exigirId(siteId, /^[A-Z]{3}$/, "siteId");
-  const resp = await pedirLecturaMl<{ status?: unknown; price_to_win?: unknown }>(`/items/${itemId}/price_to_win`, token, {
+  const resp = await pedirLecturaMl<unknown>(`/items/${itemId}/price_to_win`, token, {
     query: `?siteId=${siteId}&version=v2`,
   });
   if (!resp.ok) return null;
-  return { estado: typeof resp.data.status === "string" ? resp.data.status : null, precioParaGanar: numeroONull(resp.data.price_to_win) };
+  return leerCompetenciaItem(resp.data);
 }
 
 // ---------- Optimización, Fase 2 (detalle de una publicación) ----------
@@ -2173,6 +2200,89 @@ export async function visitasPorDiaMl(itemId: string, token: string, ultimosDias
   const resp = await pedirLecturaMl<unknown>(`/items/${itemId}/visits/time_window`, token, { query: `?last=${dias}&unit=day` });
   if (!resp.ok) return null;
   return leerVisitasPorDia(resp.data);
+}
+
+// Experiencia de compra (documentada): GET /reputation/items/{id}/
+// purchase_experience/integrators?locale=xx_YY. El locale es obligatorio.
+const LOCALES_EXPERIENCIA_COMPRA: ReadonlySet<string> = new Set(["es_MX", "es_UY", "es_CO", "es_CL", "es_AR", "es_PE", "pt_BR", "en_US"]);
+
+// "es-CO" (idioma de la cuenta) -> "es_CO"; null si ML no lo documenta.
+export function localeExperienciaCompra(idioma: unknown): string | null {
+  if (typeof idioma !== "string") return null;
+  const locale = idioma.replace("-", "_");
+  return LOCALES_EXPERIENCIA_COMPRA.has(locale) ? locale : null;
+}
+
+export type ProblemaExperienciaMl = {
+  cantidad: number | null;
+  etiqueta: string | null;
+  motivo: string | null;
+  detalle: string | null;
+  solucion: string | null;
+};
+
+export type ExperienciaCompraMl = {
+  color: string | null;
+  texto: string | null;
+  valor: number | null;
+  titulo: string | null;
+  subtitulos: string[];
+  problemas: ProblemaExperienciaMl[];
+  congelada: string | null;
+};
+
+// Reemplaza {0}, {1}... por sus placeholders; si no hay, los quita.
+function textoConPlaceholders(nodo: unknown): string | null {
+  const n = nodo as { text?: unknown; placeholders?: unknown } | null | undefined;
+  if (typeof n?.text !== "string") return null;
+  const marcadores = Array.isArray(n.placeholders) ? n.placeholders : [];
+  const texto = n.text
+    .replace(/\{(\d+)\}/g, (_, i: string) => {
+      const m = marcadores[Number(i)];
+      return typeof m === "string" || typeof m === "number" ? String(m) : "";
+    })
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return texto || null;
+}
+
+export function leerExperienciaCompra(data: unknown): ExperienciaCompraMl {
+  const d = (data ?? {}) as {
+    reputation?: { color?: unknown; text?: unknown; value?: unknown };
+    title?: unknown;
+    subtitles?: unknown;
+    metrics_details?: { problems?: unknown };
+    freeze?: unknown;
+  };
+  const problemas: ProblemaExperienciaMl[] = [];
+  for (const fila of Array.isArray(d.metrics_details?.problems) ? d.metrics_details!.problems : []) {
+    const p = fila as { quantity?: unknown; tag?: unknown; level_two?: { title?: unknown }; level_three?: { title?: unknown; remedy?: unknown } };
+    problemas.push({
+      cantidad: numeroONull(p?.quantity),
+      etiqueta: typeof p?.tag === "string" ? p.tag : null,
+      motivo: textoConPlaceholders(p?.level_two?.title),
+      detalle: textoConPlaceholders(p?.level_three?.title),
+      solucion: textoConPlaceholders(p?.level_three?.remedy),
+    });
+  }
+  return {
+    color: typeof d.reputation?.color === "string" ? d.reputation.color : null,
+    texto: typeof d.reputation?.text === "string" ? d.reputation.text : null,
+    valor: numeroONull(d.reputation?.value),
+    titulo: textoConPlaceholders(d.title),
+    subtitulos: (Array.isArray(d.subtitles) ? d.subtitles : []).map(textoConPlaceholders).filter((t): t is string => t !== null),
+    problemas,
+    congelada: textoConPlaceholders(d.freeze),
+  };
+}
+
+// 404/400 (sin datos de experiencia para esa publicación) -> null.
+export async function experienciaCompraItemMl(itemId: string, token: string, locale: string): Promise<ExperienciaCompraMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  if (!LOCALES_EXPERIENCIA_COMPRA.has(locale)) return null;
+  const resp = await pedirLecturaMl<unknown>(`/reputation/items/${itemId}/purchase_experience/integrators`, token, { query: `?locale=${locale}` });
+  if (!resp.ok) return null;
+  return leerExperienciaCompra(resp.data);
 }
 
 // ---------- Optimización, Fase 3 (editar desde Seller) ----------
@@ -2427,4 +2537,135 @@ export async function productoCatalogoDeItemMl(itemId: string, token: string): P
   if (!resp.ok) return null;
   const id = resp.data.catalog_product_id;
   return typeof id === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(id) ? id : null;
+}
+
+// ---------- Optimización — alertas (solo lectura) ----------
+// Tarjetas de alerta como las de Mercado Libre (Central de vendedores →
+// Publicaciones). Todo GET documentado; si Mercado Libre falla devuelven
+// null y la página sigue (nunca tumban la lista).
+// - Moderaciones: https://developers.mercadolibre.com.co/gestionar-moderaciones
+// - Estados de ítems: https://developers.mercadolibre.com.co/es_co/items-y-busquedas
+// - Referencias de precios: https://developers.mercadolibre.com.co/es_co/referencias-de-precios
+
+export type EstadoModeracionMl = "under_review" | "pending";
+const ESTADOS_MODERACION: readonly string[] = ["under_review", "pending"];
+
+export async function contarItemsVendedorPorEstadoMl(vendedorId: string, token: string, estado: EstadoModeracionMl): Promise<number | null> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  if (!ESTADOS_MODERACION.includes(estado)) throw new Error("Estado de publicación no permitido — no se llamó a la API.");
+  try {
+    const resp = await pedirLecturaMl<{ paging?: { total?: unknown } }>(`/users/${vendedorId}/items/search`, token, { query: `?status=${estado}&limit=1` });
+    return resp.ok ? numeroONull(resp.data?.paging?.total) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Una página de ids por estado de moderación (máx. 50). Reusa
+// listarItemsVendedorMl; si Mercado Libre falla, null.
+export async function idsItemsVendedorPorEstadoMl(
+  vendedorId: string,
+  token: string,
+  estado: EstadoModeracionMl,
+  offset: number,
+  limite: number
+): Promise<{ ids: string[]; total: number } | null> {
+  if (!ESTADOS_MODERACION.includes(estado)) throw new Error("Estado de publicación no permitido — no se llamó a la API.");
+  try {
+    return await listarItemsVendedorMl(vendedorId, token, { estado, offset, limite });
+  } catch (error) {
+    if (error instanceof MlRespuestaInesperadaError || error instanceof MlSinPermisoAppError || error instanceof MlNoDisponibleError) return null;
+    throw error;
+  }
+}
+
+export type ModeracionItemMl = { motivo: string | null; solucion: string | null; fecha: string | null };
+
+// /moderations/last_moderation/{id}-ITM responde, según la doc, un ARREGLO en
+// la raíz: [{ name, id, date_created, evidences, wordings: [{ type: REASON |
+// REMEDY, value }] }]. Si fuera un objeto, se acepta { moderations: [...] }
+// como respaldo. Toma la primera.
+export function leerModeracionItem(data: unknown): ModeracionItemMl | null {
+  const d = data as { moderations?: unknown } | null;
+  const lista = Array.isArray(data) ? data : Array.isArray(d?.moderations) ? d.moderations : null;
+  const mod = (lista ? lista[0] : d) as { wordings?: unknown; date_created?: unknown } | undefined;
+  if (!mod || typeof mod !== "object") return null;
+  let motivo: string | null = null;
+  let solucion: string | null = null;
+  for (const w of Array.isArray(mod.wordings) ? mod.wordings : []) {
+    const { type, value } = (w ?? {}) as { type?: unknown; value?: unknown };
+    if (typeof value !== "string" || !value.trim()) continue;
+    if (type === "REASON" && motivo === null) motivo = value.trim();
+    if (type === "REMEDY" && solucion === null) solucion = value.trim();
+  }
+  const fecha = typeof mod.date_created === "string" ? mod.date_created : null;
+  if (motivo === null && solucion === null && fecha === null) return null;
+  return { motivo, solucion, fecha };
+}
+
+export async function ultimaModeracionItemMl(itemId: string, token: string): Promise<ModeracionItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    // El sufijo -ITM lo arma el código, nunca la persona.
+    const resp = await pedirLecturaMl<unknown>(`/moderations/last_moderation/${itemId}-ITM`, token);
+    return resp.ok ? leerModeracionItem(resp.data) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function leerItemsConReferenciaPrecio(data: unknown): { total: number; ids: string[] } | null {
+  const d = data as { total?: unknown; items?: unknown } | null;
+  if (!d || !Array.isArray(d.items)) return null;
+  const ids = d.items.filter((i): i is string => typeof i === "string" && PATRON_ID_PRODUCTO_O_ITEM.test(i));
+  const total = numeroONull(d.total);
+  return { total: total !== null && total >= ids.length ? total : ids.length, ids };
+}
+
+export async function itemsConReferenciaPrecioMl(vendedorId: string, token: string): Promise<{ total: number; ids: string[] } | null> {
+  exigirId(vendedorId, PATRON_ID_VENDEDOR, "vendedorId");
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/suggestions/user/${vendedorId}/items`, token);
+    return resp.ok ? leerItemsConReferenciaPrecio(resp.data) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type ReferenciaPrecioItemMl = {
+  estado: string | null;
+  precioActual: number | null;
+  precioSugerido: number | null;
+  diferenciaPorcentaje: number | null;
+  moneda: string | null;
+};
+
+export function leerReferenciaPrecioItem(data: unknown): ReferenciaPrecioItemMl | null {
+  const d = data as {
+    status?: unknown;
+    current_price?: { amount?: unknown; currency_id?: unknown };
+    suggested_price?: { amount?: unknown; currency_id?: unknown };
+    percent_difference?: unknown;
+    currency_id?: unknown;
+  } | null;
+  if (!d || typeof d !== "object") return null;
+  const moneda = [d.currency_id, d.current_price?.currency_id, d.suggested_price?.currency_id].find((m): m is string => typeof m === "string" && /^[A-Z]{3}$/.test(m)) ?? null;
+  return {
+    estado: typeof d.status === "string" ? d.status : null,
+    precioActual: numeroONull(d.current_price?.amount),
+    precioSugerido: numeroONull(d.suggested_price?.amount),
+    diferenciaPorcentaje: numeroONull(d.percent_difference),
+    moneda,
+  };
+}
+
+// 404 = sin referencia para esa publicación (no es un error).
+export async function referenciaPrecioItemMl(itemId: string, token: string): Promise<ReferenciaPrecioItemMl | null> {
+  exigirId(itemId, PATRON_ID_PRODUCTO_O_ITEM, "itemId");
+  try {
+    const resp = await pedirLecturaMl<unknown>(`/suggestions/items/${itemId}/details`, token);
+    return resp.ok ? leerReferenciaPrecioItem(resp.data) : null;
+  } catch {
+    return null;
+  }
 }
