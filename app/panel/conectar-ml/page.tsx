@@ -10,7 +10,8 @@ import { datosSitioMl } from "@/lib/ml/sitios";
 import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
 import { contarPedidosPorCuenta as contarPedidosFalabella, TOPE_ORDENES as TOPE_ORDENES_FALABELLA } from "@/lib/falabella/pedidos";
 import { desconectarCuentaAction } from "./[cuentaId]/desconectar/actions";
-import { conectarCuentaFalabella, desconectarCuentaFalabella, sincronizarPedidosFalabella } from "./actions";
+import { listarCuentasMpConectadas } from "@/lib/mp/cuentas";
+import { conectarCuentaFalabella, desconectarCuentaFalabella, desconectarCuentaMercadoPago, sincronizarPedidosFalabella } from "./actions";
 import { BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
@@ -55,6 +56,13 @@ const MENSAJES_ERROR_CONECTAR: Record<string, string> = {
   falabella_sincronizar_fallo: "No se pudieron traer los pedidos de Falabella. Intenta de nuevo en un momento.",
   falabella_configuracion: "No pudimos conectar por un problema de configuración de Zilonix, no de tus datos. Intenta más tarde o avísanos.",
   falabella_error_desconocido: "No se pudo conectar la cuenta de Falabella — revisa el UserID y la API Key e intenta de nuevo.",
+  // Issue #422 (Bloque 1) — Mercado Pago, prefijo "mp_" por el mismo
+  // motivo que "falabella_": nunca pisa un código de Mercado Libre.
+  mp_estado_vencido: "La conexión con Mercado Pago tardó demasiado o se perdió el estado — empieza de nuevo con \"Conectar Mercado Pago\".",
+  mp_rechazo: "Mercado Pago no autorizó la conexión.",
+  mp_sin_permiso: "No tienes permiso para conectar una cuenta de Mercado Pago.",
+  mp_cuenta_en_otra_empresa: "Esta cuenta de Mercado Pago ya está conectada a otra empresa en Zilonix. Desconéctala allá primero o escríbenos a soporte.",
+  mp_error_desconocido: "No se pudo conectar la cuenta de Mercado Pago — intenta de nuevo en un momento.",
 };
 const MENSAJE_ERROR_POR_DEFECTO = "No se pudo conectar la cuenta — intenta de nuevo en un momento.";
 
@@ -82,7 +90,7 @@ async function tienePermiso(...args: Parameters<typeof requierePermiso>): Promis
 export default async function ConectarMlPage({
   searchParams,
 }: {
-  searchParams: { conectado?: string; conectado_falabella?: string; error?: string; aviso?: string };
+  searchParams: { conectado?: string; conectado_falabella?: string; conectado_mp?: string; error?: string; aviso?: string };
 }) {
   const usuario = await obtenerOCrearUsuarioActual();
   if (!usuario) redirect("/sign-in");
@@ -108,16 +116,21 @@ export default async function ConectarMlPage({
   const cuentas = await listarCuentasConectadas(empresa.id);
   const cuentasFalabella = await listarCuentasFalabella(empresa.id);
   const pedidosPorCuentaFalabella = await contarPedidosFalabella(empresa.id);
+  const cuentasMp = await listarCuentasMpConectadas(empresa.id);
   // Revisión del PR #415: el servidor ya bloquea estas acciones, pero no
   // se muestran botones que van a fallar.
   const puedeConectar = await tienePermiso(usuario.id, empresa.id, "configuracion", "crear");
   const puedeDesconectar = await tienePermiso(usuario.id, empresa.id, "configuracion", "modificar");
   const esErrorFalabella = searchParams.error?.startsWith("falabella_") ?? false;
+  const esErrorMp = searchParams.error?.startsWith("mp_") ?? false;
   // Bug real (PKCE): el link de autorización ya no se arma acá — cada
   // intento necesita un code_verifier NUEVO (de un solo uso), así que
   // /api/ml/conectar lo genera recién al hacer clic, no de antemano en
   // esta misma carga de la página.
   const urlConectar = "/api/ml/conectar";
+  // Issue #422 (Bloque 1) — mismo motivo: /api/mp/conectar genera el
+  // state nuevo recién al hacer clic.
+  const urlConectarMp = "/api/mp/conectar";
 
   // Tarea 2.5 — importación inicial corriendo en segundo plano, una
   // por cada cuenta conectada (ActualizarMientrasImporta refresca solo mientras
@@ -134,6 +147,7 @@ export default async function ConectarMlPage({
 
       {searchParams.conectado && <div className={styles.avisoExito}>Cuenta conectada.</div>}
       {searchParams.conectado_falabella && <div className={styles.avisoExito}>Cuenta de Falabella conectada.</div>}
+      {searchParams.conectado_mp && <div className={styles.avisoExito}>Cuenta de Mercado Pago conectada.</div>}
       {searchParams.aviso === "falabella_tope_ordenes" && (
         <div className={styles.avisoInfo}>
           Se importaron los primeros {TOPE_ORDENES_FALABELLA.toLocaleString("es-CO")} pedidos de Falabella de los últimos 60 días, que es el
@@ -155,7 +169,7 @@ export default async function ConectarMlPage({
               abría el OAuth de Mercado Libre — ahí el formulario de abajo
               ya es el reintento. */}
           {!esErrorFalabella && (
-            <a href={urlConectar} className={styles.reintentar}>
+            <a href={esErrorMp ? urlConectarMp : urlConectar} className={styles.reintentar}>
               Reintentar
             </a>
           )}
@@ -312,6 +326,45 @@ export default async function ConectarMlPage({
             Conectar Falabella
           </button>
         </form>
+      )}
+
+      <h3 className={styles.tituloCanal}>Mercado Pago</h3>
+
+      {cuentasMp.length === 0 && <EstadoVacio>Todavía no tienes ninguna cuenta de Mercado Pago conectada.</EstadoVacio>}
+
+      {cuentasMp.length > 0 && (
+        <ListaFilas>
+          {cuentasMp.map((cuenta) => {
+            const nombre = cuenta.nickname ?? cuenta.cuentaIdExterna;
+            return (
+              <FilaLista key={cuenta.id}>
+                <div className={styles.filaCuenta}>
+                  <span>
+                    Conectado como <strong>{nombre}</strong>
+                    {cuenta.desconectadaTs && <Chip>Desconectada</Chip>}
+                  </span>
+                  {!cuenta.desconectadaTs && puedeDesconectar && (
+                    <ConfirmacionDoble
+                      textoDisparador="Desconectar"
+                      titulo={`¿Desconectar la cuenta ${nombre}?`}
+                      descripcion="Zilonix dejará de usar esta cuenta de Mercado Pago. Lo ya registrado no se borra."
+                      nombreEsperado={nombre}
+                      textoConfirmar="Desconectar definitivamente"
+                      onConfirmar={desconectarCuentaMercadoPago.bind(null, cuenta.id)}
+                    />
+                  )}
+                </div>
+              </FilaLista>
+            );
+          })}
+        </ListaFilas>
+      )}
+
+      {puedeConectar && (
+        // <a> normal, no next/link — /api/mp/conectar arranca el OAuth real.
+        <a href={urlConectarMp} className={clasesBoton("primario")}>
+          Conectar Mercado Pago
+        </a>
       )}
 
       <BotonLink href="/panel" variante="fantasma">

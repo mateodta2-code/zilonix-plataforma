@@ -167,6 +167,48 @@ export function totalesPorTipo(filas: FilaDisponible[]): { tipo: TipoCuentaDispo
   return TIPOS_CUENTA_DISPONIBLE.map((tipo) => ({ tipo, totales: totalesPorMoneda(filas.filter((f) => f.tipo === tipo)) }));
 }
 
+// ---------- Mercado Pago (Reporte de Liberaciones) ----------
+
+// Issue #422 — el último saldo disponible de cada cuenta de Mercado Pago
+// activa, guardado en cuentas_mp por sincronizarSaldoMp
+// (lib/finanzas/disponible-consulta.ts). La página lo lee de la base, sin
+// llamar a Mercado Pago en cada visita.
+export type CuentaMpDisponible = {
+  id: string;
+  cuentaIdExterna: string;
+  nickname: string | null;
+  ultimoSaldoDisponible: string | null;
+  ultimaMoneda: string | null;
+  ultimoCorteFecha: string | null;
+  ultimoSaldoTs: Date | null;
+  reportePendienteFile: string | null;
+  reportePendienteTs: Date | null;
+  ultimoErrorSaldo: string | null;
+};
+
+// Solo las cuentas ya sincronizadas: suman a totalesPorMoneda y
+// totalesPorTipo como billeteras. El id lleva el prefijo "mp:" para que
+// nunca se confunda con el UUID de una cuenta manual.
+export function filasDesdeCuentasMp(cuentasMp: CuentaMpDisponible[], hoy: string): FilaDisponible[] {
+  return cuentasMp.flatMap((c): FilaDisponible[] => {
+    if (c.ultimoSaldoDisponible === null) return [];
+    return [
+      {
+        id: `mp:${c.id}`,
+        nombre: c.nickname || c.cuentaIdExterna,
+        tipo: "billetera",
+        entidad: "Mercado Pago",
+        ultimos4: null,
+        moneda: c.ultimaMoneda ?? "COP",
+        activa: true,
+        saldo: c.ultimoSaldoDisponible,
+        fechaCorte: c.ultimoCorteFecha,
+        desactualizado: esDesactualizado(c.ultimoCorteFecha, hoy),
+      },
+    ];
+  });
+}
+
 // ---------- Validación de formularios ----------
 
 export type DatosCuentaDisponible = Omit<CuentaDisponible, "id" | "activa">;

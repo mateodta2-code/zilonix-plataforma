@@ -714,6 +714,54 @@ export const cuentasFalabella = pgTable(
   })
 );
 
+// Issue #422 (Bloque 1) — una cuenta de Mercado Pago conectada a una
+// empresa por OAuth. Mismo molde que cuentasMl: tokens cifrados con
+// lib/cifrado.ts (misma clave ML_TOKEN_KEY_Vn que Canva, para no pedir
+// otra variable en Railway), candado `renovandoTs` contra renovaciones
+// dobles y desconectar solo marca `desconectadaTs`, nunca borra la fila.
+export const cuentasMp = pgTable(
+  "cuentas_mp",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // user_id de Mercado Pago (el que devuelve /oauth/token).
+    cuentaIdExterna: text("cuenta_id_externa").notNull(),
+    // Opcional: /users/me es best-effort (nickname o email) — si no
+    // respondió al conectar, la pantalla muestra el user_id.
+    nickname: text("nickname"),
+    accessTokenCifrado: jsonb("access_token_cifrado").$type<TokenCifrado>().notNull(),
+    refreshTokenCifrado: jsonb("refresh_token_cifrado").$type<TokenCifrado>().notNull(),
+    tokenExpiraTs: timestamp("token_expira_ts", { withTimezone: true }).notNull(),
+    renovandoTs: timestamp("renovando_ts", { withTimezone: true }),
+    desconectadaTs: timestamp("desconectada_ts", { withTimezone: true }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    // Issue #422 — último saldo disponible leído del Reporte de
+    // Liberaciones (lib/mp/liberaciones-reporte.ts), guardado acá para que
+    // /panel/finanzas/disponible no llame a Mercado Pago en cada visita.
+    // Mismo tipo que saldos_disponible.saldo.
+    ultimoSaldoDisponible: numeric("ultimo_saldo_disponible", { precision: 16, scale: 2 }),
+    ultimaMoneda: text("ultima_moneda"),
+    // AAAA-MM-DD, día de Bogotá.
+    ultimoCorteFecha: text("ultimo_corte_fecha"),
+    ultimoSaldoTs: timestamp("ultimo_saldo_ts", { withTimezone: true }),
+    // file_name (o id de tarea) del reporte pedido mientras Mercado Pago
+    // lo prepara.
+    reportePendienteFile: text("reporte_pendiente_file"),
+    reportePendienteTs: timestamp("reporte_pendiente_ts", { withTimezone: true }),
+    // Código corto seguro (mp_sin_config, mp_403, mp_sin_datos...), nunca
+    // el body de Mercado Pago.
+    ultimoErrorSaldo: text("ultimo_error_saldo"),
+  },
+  (t) => ({
+    // Una cuenta real de Mercado Pago no puede estar conectada a dos
+    // empresas de Zilonix a la vez (mismo criterio que cuentas_ml).
+    cuentaUnica: uniqueIndex("cuentas_mp_cuenta_externa_unica").on(t.cuentaIdExterna),
+    // Para futuras FK compuestas (empresa_id, cuenta_mp_id), igual que
+    // cuentas_falabella_empresa_id_unica.
+    empresaIdUnica: unique("cuentas_mp_empresa_id_unica").on(t.empresaId, t.id),
+  })
+);
+
 export const pedidosFalabella = pgTable(
   "pedidos_falabella",
   {
