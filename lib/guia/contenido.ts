@@ -115,7 +115,7 @@ export const GUIA: GrupoGuia[] = [
             pasos: [
               "Necesitas una bodega ligada a tu empresa con domiciliarios activos (la liga el equipo de Zilonix).",
               "En «Pendientes», en un pedido ⚡ Flex pulsa «Asignar domiciliario», elige a la persona y escribe nombre de quien recibe, dirección, barrio, ciudad, teléfono y una nota. Mientras no haya salido puedes «Reasignar» o quitarlo.",
-              "El domiciliario ve la entrega en su celular y la marca «En camino», «Entregado» o «No entregado» (con motivo). Tú ves el estado en el mismo pedido.",
+              "El domiciliario ve la entrega en su celular, con botones para llamar y para abrir la dirección en Google Maps o Waze, y la marca «En camino», «Entregado» o «No entregado» (con motivo). Tú ves el estado en el mismo pedido.",
               "Al marcar «Entregado» el domiciliario tiene que tomar una foto. Cuando la entrega está entregada, pulsa «Ver foto de la entrega» para verla.",
               "Si algo pasa en el camino (va tarde, el cliente pide reprogramar o no contesta, el paquete se dañó), el domiciliario reporta una «Novedad» sin cerrar la entrega. Las ves debajo del estado, con la hora; si trae foto, pulsa «Ver foto».",
             ],
@@ -123,6 +123,7 @@ export const GUIA: GrupoGuia[] = [
         ],
         consejos: [
           "La lista se actualiza sola; si acabas de vender, usa «Sincronizar ahora».",
+          "Escribe la dirección completa (calle, número, barrio y ciudad): es la que el domiciliario abre en Google Maps o Waze. Si está incompleta, el mapa puede ubicarla mal.",
           "La foto de entrega es privada: solo la ven las personas de tu empresa con acceso a ventas. El domiciliario deja de ver la dirección y la foto cuando cierra la entrega.",
         ],
       },

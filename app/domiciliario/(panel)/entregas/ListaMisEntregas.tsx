@@ -4,6 +4,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import type { listarMisEntregas } from "@/lib/entregas/entregas";
 import type { NovedadEntrega } from "@/lib/entregas/novedades";
 import { TIPOS_NOVEDAD } from "@/lib/entregas/tiposNovedad";
+import { linkGoogleMaps, linkWaze, textoDireccion } from "@/lib/entregas/mapas";
 import { BotonesEntrega } from "./BotonesEntrega";
 import { ReportarNovedad } from "./ReportarNovedad";
 import styles from "./entregas.module.css";
@@ -73,6 +74,8 @@ function TarjetaEntrega({ entrega: e, novedades }: { entrega: Entrega; novedades
           <p className={styles.dato}>
             Recibe: <strong>{e.receptorNombre}</strong>
           </p>
+          {/* Abrir la dirección en la app de mapas del celular (links universales). */}
+          <BotonesMapa direccion={textoDireccion(e)} />
           <a className={styles.llamar} href={`tel:${e.telefono.replace(/[^\d+]/g, "")}`}>
             Llamar {e.telefono}
           </a>
@@ -97,5 +100,19 @@ function TarjetaEntrega({ entrega: e, novedades }: { entrega: Entrega; novedades
       {abierta && <BotonesEntrega entregaId={e.id} estado={e.estado} />}
       {abierta && <ReportarNovedad entregaId={e.id} />}
     </Tarjeta>
+  );
+}
+
+function BotonesMapa({ direccion }: { direccion: string | null }) {
+  if (!direccion) return null;
+  return (
+    <div className={styles.mapas}>
+      <a className={styles.llamar} href={linkGoogleMaps(direccion)} target="_blank" rel="noopener noreferrer">
+        Google Maps
+      </a>
+      <a className={styles.llamar} href={linkWaze(direccion)} target="_blank" rel="noopener noreferrer">
+        Waze
+      </a>
+    </div>
   );
 }
