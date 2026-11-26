@@ -360,6 +360,22 @@ export const GUIA: GrupoGuia[] = [
         pasos: ["Busca si alguien ya hizo tu pregunta.", "Si no, publícala. Solo se muestra tu nombre, nunca tu empresa ni tus ventas."],
         consejos: ["No compartas datos de tus clientes ni claves."],
       },
+      {
+        id: "tickets",
+        titulo: "Tickets de soporte",
+        ruta: "/panel/tickets",
+        paraQue: "Pedirle ayuda al equipo de Zilonix cuando algo no funciona, y seguir la conversación.",
+        pasos: [
+          "Escribe un asunto corto, elige el módulo donde pasa el problema y cuenta qué intentabas hacer y qué ocurrió.",
+          "Si ayuda, pulsa «Adjuntar imágenes» y agrega hasta 3 capturas de pantalla que muestren el problema. Puedes quitarlas con la ✕ antes de enviar.",
+          "Pulsa «Abrir ticket». En la lista ves el estado: Abierto, En curso o Resuelto.",
+          "Abre el ticket para ver las respuestas de soporte y escribir otro mensaje (también con imágenes). Toca una imagen para verla en grande.",
+        ],
+        consejos: [
+          "Las imágenes son privadas: solo las ven las personas de tu empresa y el equipo de soporte de Zilonix.",
+          "Un ticket resuelto ya no admite mensajes: si el problema sigue, abre uno nuevo.",
+        ],
+      },
     ],
   },
 ];
