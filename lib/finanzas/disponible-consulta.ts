@@ -12,6 +12,7 @@ import {
 } from "@/lib/mp/cuentas";
 import {
   asegurarConfigReporteLiberaciones,
+  consultarTareaReporteLiberaciones,
   descargarReporteLiberaciones,
   ErrorLiberacionesMp,
   extraerSaldoDeCsvLiberaciones,
@@ -130,6 +131,21 @@ export type ResultadoSincronizacionMp =
   | { estado: "en_preparacion" }
   | { estado: "error"; codigo: CodigoErrorSaldoMp };
 
+// Lo que se guarda en ultimo_error_saldo: el código y, si lo hay, el status
+// HTTP de Mercado Pago (ej. "mp_http:400"). Nunca el body ni el token.
+function codigoConStatus(codigo: CodigoErrorSaldoMp, error: unknown): string {
+  const status = error instanceof ErrorLiberacionesMp ? error.status : undefined;
+  return status ? `${codigo}:${status}` : codigo;
+}
+
+// reporte_pendiente_file guarda el file_name (".csv"/".xlsx"), el id de la
+// tarea o "solicitado" (202 sin cuerpo útil). Solo un id se puede seguir
+// con GET /task/{id}.
+function taskIdPendiente(valor: string | null): string | null {
+  if (!valor || valor === "solicitado" || /\.(csv|xlsx)$/i.test(valor)) return null;
+  return valor;
+}
+
 function codigoDeError(error: unknown): CodigoErrorSaldoMp {
   if (error instanceof ErrorLiberacionesMp) return error.codigo;
   if (error instanceof CandadoRenovacionMpError) return "mp_renovando";
@@ -199,10 +215,9 @@ export async function sincronizarSaldoMp(entrada: { empresaId: string; usuarioId
 
   try {
     const token = await obtenerAccessTokenMpVigente(empresaId, cuenta.id);
-    const reporte = elegirReporte(await listarReportesLiberaciones(token), cuenta);
 
-    if (reporte) {
-      const leido = extraerSaldoDeCsvLiberaciones(await descargarReporteLiberaciones(token, reporte.fileName));
+    const guardarSaldo = async (fileName: string): Promise<ResultadoSincronizacionMp> => {
+      const leido = extraerSaldoDeCsvLiberaciones(await descargarReporteLiberaciones(token, fileName));
       if (!leido) throw new ErrorLiberacionesMp("mp_sin_datos");
       const fechaCorte = leido.fecha ?? diaBogota(new Date());
       await dbComoEmpresa(empresaId, async (tx) => {
@@ -230,26 +245,64 @@ export async function sincronizarSaldoMp(entrada: { empresaId: string; usuarioId
         });
       });
       return { estado: "actualizado", saldo: leido.saldo, moneda: leido.moneda, fechaCorte };
+    };
+
+    // Pide un reporte nuevo. La configuración no bloquea: si Mercado Pago
+    // la rechaza (400/403), se pide igual con sus columnas por defecto.
+    const pedirReporte = async (): Promise<ResultadoSincronizacionMp> => {
+      const config = await asegurarConfigReporteLiberaciones(token);
+      if (typeof config === "object") {
+        console.warn(
+          `[lib/finanzas/disponible-consulta] Mercado Pago rechazó la configuración del reporte de liberaciones (cuenta ${cuenta.id}); se pide con columnas por defecto:`,
+          "status",
+          config.status
+        );
+      }
+      const { beginDateIso, endDateIso } = rangoReporteLiberaciones(new Date());
+      const solicitud = await solicitarReporteLiberaciones(token, beginDateIso, endDateIso);
+      const pendiente = "fileName" in solicitud ? solicitud.fileName : solicitud.taskId;
+      await dbComoEmpresa(empresaId, (tx) =>
+        tx.update(cuentasMp).set({ reportePendienteFile: pendiente, reportePendienteTs: new Date(), ultimoErrorSaldo: null }).where(deEstaCuenta)
+      );
+      await auditar(`Pidió el reporte de liberaciones de Mercado Pago ${nombre}.`);
+      return { estado: "en_preparacion" };
+    };
+
+    // Con un id de tarea guardado, primero se pregunta por esa tarea.
+    const taskId = taskIdPendiente(cuenta.reportePendienteFile);
+    if (taskId) {
+      const tarea = await consultarTareaReporteLiberaciones(token, taskId);
+      if (tarea.status === "processed" && tarea.fileName) return await guardarSaldo(tarea.fileName);
+      if (tarea.status === "pending" || tarea.status === "processing") return { estado: "en_preparacion" };
+      if (tarea.status === "failed" || tarea.status === "deleted") {
+        await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMp).set({ reportePendienteFile: null, reportePendienteTs: null }).where(deEstaCuenta));
+        return await pedirReporte();
+      }
+      // Otro estado (o processed sin file_name): se busca en el listado.
     }
+
+    const reporte = elegirReporte(await listarReportesLiberaciones(token), cuenta);
+    if (reporte) return await guardarSaldo(reporte.fileName);
 
     const pedidoReciente = cuenta.reportePendienteTs !== null && Date.now() - cuenta.reportePendienteTs.getTime() < ESPERA_REPORTE_PENDIENTE_MS;
     if (pedidoReciente) return { estado: "en_preparacion" };
 
-    await asegurarConfigReporteLiberaciones(token);
-    const { beginDateIso, endDateIso } = rangoReporteLiberaciones(new Date());
-    const solicitud = await solicitarReporteLiberaciones(token, beginDateIso, endDateIso);
-    const pendiente = "fileName" in solicitud ? solicitud.fileName : solicitud.taskId;
-    await dbComoEmpresa(empresaId, (tx) =>
-      tx.update(cuentasMp).set({ reportePendienteFile: pendiente, reportePendienteTs: new Date(), ultimoErrorSaldo: null }).where(deEstaCuenta)
-    );
-    await auditar(`Pidió el reporte de liberaciones de Mercado Pago ${nombre}.`);
-    return { estado: "en_preparacion" };
+    return await pedirReporte();
   } catch (error) {
     const codigo = codigoDeError(error);
-    // Solo el código y el nombre del error: nunca el token ni el CSV.
-    console.warn(`[lib/finanzas/disponible-consulta] no se pudo sincronizar el saldo de Mercado Pago (cuenta ${cuenta.id}):`, codigo, error instanceof Error ? error.name : "desconocido");
-    await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMp).set({ ultimoErrorSaldo: codigo }).where(deEstaCuenta));
-    await auditar(`No se pudo actualizar el saldo de Mercado Pago ${nombre} (${codigo}).`);
+    const status = error instanceof ErrorLiberacionesMp ? error.status : undefined;
+    const guardado = codigoConStatus(codigo, error);
+    // Solo el código, el status HTTP y el nombre del error: nunca el token ni el CSV.
+    console.warn(
+      `[lib/finanzas/disponible-consulta] no se pudo sincronizar el saldo de Mercado Pago (cuenta ${cuenta.id}):`,
+      "codigo",
+      codigo,
+      "status",
+      status ?? "sin status",
+      error instanceof Error ? error.name : "desconocido"
+    );
+    await dbComoEmpresa(empresaId, (tx) => tx.update(cuentasMp).set({ ultimoErrorSaldo: guardado }).where(deEstaCuenta));
+    await auditar(`No se pudo actualizar el saldo de Mercado Pago ${nombre} (${guardado}).`);
     return { estado: "error", codigo };
   }
 }

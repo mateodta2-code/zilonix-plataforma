@@ -79,6 +79,7 @@ const MENSAJE_ERROR_SALDO_MP: Record<CodigoErrorSaldoMp, string> = {
   mp_red: "No se pudo contactar a Mercado Pago. Inténtalo de nuevo en unos minutos.",
   mp_sin_config: "No se pudo configurar el reporte de liberaciones en Mercado Pago.",
   mp_sin_datos: "El reporte de liberaciones de Mercado Pago no trae un saldo legible.",
+  mp_reporte_no_creado: "Mercado Pago no creó el reporte de liberaciones. Inténtalo de nuevo en unos minutos.",
   mp_renovando: "Se está renovando la conexión con Mercado Pago: inténtalo de nuevo en unos segundos.",
   mp_reconectar: "Hay que reconectar la cuenta de Mercado Pago en Conectar.",
   mp_error: "No se pudo actualizar el saldo de Mercado Pago.",
