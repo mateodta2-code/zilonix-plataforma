@@ -169,6 +169,9 @@ const RUTAS_PROTEGIDAS = new Set([
   // montos ventas.consultar; la acción valida la cuenta contra la empresa.
   "app/panel/optimizacion/analisis/page.tsx",
   "app/panel/optimizacion/analisis/actions.ts",
+  // Rendimiento de Optimización (refs #703): solo lectura, inventario.consultar; los montos, además ventas.consultar.
+  "app/panel/optimizacion/rendimiento/page.tsx",
+  "app/panel/optimizacion/rendimiento/actions.ts",
   "app/api/ml/despachos/etiqueta/route.ts",
   "app/panel/investigacion/page.tsx",
   "app/panel/investigacion/actions.ts",
