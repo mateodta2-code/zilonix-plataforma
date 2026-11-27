@@ -1,8 +1,13 @@
 import { redirect } from "next/navigation";
+import { normalizarParametro } from "@/lib/filtros-listado";
 import { Boton } from "@/components/marco/Boton";
+import { Campo } from "@/components/marco/Campo";
+import { Tarjeta } from "@/components/marco/Tarjeta";
 import { listarMembresiasDeUsuario } from "@/lib/bodega/miembros";
 import { tienePerfilDomiciliario } from "@/lib/bodega/perfil-domiciliario";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
+import styles from "@/app/panel/personas/page.module.css";
+import formStyles from "@/app/panel/invitar/page.module.css";
 import { crearPerfilDomiciliarioAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -17,35 +22,30 @@ export default async function CrearPerfilDomiciliarioPage({ searchParams }: { se
   const [membresias, tienePerfil] = await Promise.all([listarMembresiasDeUsuario(usuario.id), tienePerfilDomiciliario(usuario.id)]);
   if (tienePerfil || membresias.some((m) => m.rol === "domiciliario" && m.activo)) redirect("/domiciliario");
 
-  const campo = { display: "block", width: "100%", padding: 8, marginTop: 4, boxSizing: "border-box" } as const;
+  const error = normalizarParametro(searchParams.error);
   return (
-    <main style={{ maxWidth: 420, margin: "0 auto", padding: "48px 24px" }}>
+    <main style={{ maxWidth: 480, margin: "0 auto", padding: "48px 24px" }}>
       <h1 style={{ fontSize: 24, fontWeight: 700 }}>Crea tu perfil de domiciliario</h1>
       <p style={{ opacity: 0.7, fontSize: 14, lineHeight: 1.5 }}>
         Con este perfil las bodegas podrán invitarte con tu correo ({usuario.email}). Solo el nombre es obligatorio.
       </p>
-      {searchParams.error ? (
-        <p role="alert" style={{ fontSize: 13 }}>
-          {searchParams.error}
-        </p>
-      ) : null}
-      <form action={crearPerfilDomiciliarioAction} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
-        <label style={{ fontSize: 13 }}>
-          Nombre
-          <input name="nombre" required maxLength={120} defaultValue={usuario.nombre} style={campo} />
-        </label>
-        <label style={{ fontSize: 13 }}>
-          Teléfono (opcional)
-          <input name="telefono" type="tel" maxLength={30} style={campo} />
-        </label>
-        <label style={{ fontSize: 13 }}>
-          Ciudad (opcional)
-          <input name="ciudad" maxLength={80} style={campo} />
-        </label>
-        <Boton type="submit" style={{ marginTop: 8 }}>
-          Crear perfil
-        </Boton>
-      </form>
+      {error && <p className={styles.avisoError}>{error}</p>}
+      <Tarjeta>
+        <form action={crearPerfilDomiciliarioAction} className={formStyles.form}>
+          <Campo etiqueta="Nombre">
+            <input name="nombre" required maxLength={120} defaultValue={usuario.nombre} className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Teléfono (opcional)">
+            <input name="telefono" type="tel" maxLength={30} className="zx-control" />
+          </Campo>
+          <Campo etiqueta="Ciudad (opcional)">
+            <input name="ciudad" maxLength={80} className="zx-control" />
+          </Campo>
+          <Boton type="submit" className={formStyles.botonEnviar}>
+            Crear perfil
+          </Boton>
+        </form>
+      </Tarjeta>
     </main>
   );
 }

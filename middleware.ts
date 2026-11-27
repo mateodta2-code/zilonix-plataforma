@@ -102,6 +102,7 @@ export default clerkMiddleware(async (auth, req) => {
     !req.nextUrl.pathname.startsWith("/sign-up") &&
     !req.nextUrl.pathname.startsWith("/superadmin/iniciar-sesion") &&
     !req.nextUrl.pathname.startsWith("/bodega/iniciar-sesion") &&
+    !req.nextUrl.pathname.startsWith("/bodega/registro") &&
     !req.nextUrl.pathname.startsWith("/domiciliario/iniciar-sesion") &&
     !req.nextUrl.pathname.startsWith("/domiciliario/registro")
   ) {

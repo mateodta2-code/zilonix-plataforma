@@ -51,6 +51,9 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // /bodega ni /domiciliario enteros — esos siguen cerrados) y la
   // página de aceptar invitación: el token en la URL es el permiso.
   "/bodega/iniciar-sesion(.*)",
+  // Registro propio de la bodega: solo monta <SignUp/> de Clerk. /bodega/crear
+  // NO es pública: exige sesión.
+  "/bodega/registro(.*)",
   "/domiciliario/iniciar-sesion(.*)",
   // Autorregistro del domiciliario: aún no tiene sesión; /crear-perfil sí la exige.
   "/domiciliario/registro(.*)",
