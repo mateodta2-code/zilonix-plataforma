@@ -92,6 +92,9 @@ type Props = {
   // español neutro (onboarding de 5 minutos); sin esto, el texto por
   // defecto de abajo ("foto financiera") sigue para Finanzas → Ventas.
   mensajeVacio?: React.ReactNode;
+  // Tope del rango de fechas. Finanzas → Ventas pasa 3 meses; Pedidos
+  // se queda con el de siempre (31 días).
+  rangoMaximoDias?: number;
 };
 
 export async function DetalleDiaCuentaProducto({
@@ -103,6 +106,7 @@ export async function DetalleDiaCuentaProducto({
   mostrarResumen = true,
   acciones,
   mensajeVacio,
+  rangoMaximoDias,
 }: Props) {
   const cuentas = await listarCuentasMlParaSelector(empresaId);
   let puedeTraerVentas = true;
@@ -117,7 +121,7 @@ export async function DetalleDiaCuentaProducto({
   const cuentaId = resolverCuentaMl(searchParams[PARAM_CUENTA], cuentas);
   const costoParam = normalizarParametro(searchParams.costo);
   const costo = costoParam === "con" || costoParam === "sin" ? costoParam : undefined;
-  const rango = resolverRangoVentas(normalizarParametro(searchParams.desde), normalizarParametro(searchParams.hasta), new Date());
+  const rango = resolverRangoVentas(normalizarParametro(searchParams.desde), normalizarParametro(searchParams.hasta), new Date(), rangoMaximoDias);
 
   let datos: ResultadoVentasUtilidad | null = null;
   let errorRango = rango.error ?? null;

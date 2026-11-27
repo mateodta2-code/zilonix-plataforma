@@ -216,6 +216,11 @@ export function resumirPorCuenta(detalle: DetalleVentas): ResumenCuenta[] {
 // ---------------------------------------------------------------------------
 
 export const RANGO_MAXIMO_DIAS = 31;
+// Finanzas → Ventas y utilidad (pedido del 27-nov): hasta 3 meses para
+// comparar trimestres. 92 = el trimestre más largo (jul–sep, oct–dic).
+// Pedidos e indicadores siguen con 31: no se pidió allá y Pedidos pinta
+// cada venta.
+export const RANGO_MAXIMO_DIAS_FINANZAS = 92;
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 export type RangoVentas = {
@@ -244,7 +249,8 @@ export function mesActualBogota(ahora: Date): { desde: string; hasta: string } {
 export function resolverRangoVentas(
   desde: string | undefined,
   hasta: string | undefined,
-  ahora: Date
+  ahora: Date,
+  maximoDias: number = RANGO_MAXIMO_DIAS
 ): { rango: RangoVentas; error?: undefined } | { rango?: undefined; error: string } {
   if (!desde && !hasta) ({ desde, hasta } = mesActualBogota(ahora));
   else if (!desde) desde = hasta;
@@ -254,7 +260,7 @@ export function resolverRangoVentas(
   if (!limitesDesde || !limitesHasta) return { error: "Las fechas tienen que ir como AAAA-MM-DD y ser días reales." };
   if (limitesHasta.finExclusivo <= limitesDesde.inicio) return { error: "La fecha «hasta» no puede ser anterior a «desde»." };
   const dias = Math.round((limitesHasta.finExclusivo.getTime() - limitesDesde.inicio.getTime()) / DIA_MS);
-  if (dias > RANGO_MAXIMO_DIAS) return { error: `El rango puede tener como máximo ${RANGO_MAXIMO_DIAS} días (pediste ${dias}).` };
+  if (dias > maximoDias) return { error: `El rango puede tener como máximo ${maximoDias} días (pediste ${dias}).` };
   return { rango: { desde: desde as string, hasta: hasta as string, inicio: limitesDesde.inicio, finExclusivo: limitesHasta.finExclusivo } };
 }
 
