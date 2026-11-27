@@ -68,3 +68,33 @@ export function fechaHoraBogota(fecha: Date): string {
 export function mostrarMontoIso(valor: string, moneda: string): string {
   return formatearMonedaIso(Number(valor), moneda);
 }
+
+// Detalle día a día (27-nov): «2026-11-27» → «Jue 27 nov 2026». El día ya
+// es de Bogotá (AAAA-MM-DD), así que se lee en UTC sin mover la fecha.
+const DIAS_SEMANA = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+export function fechaDiaLegible(dia: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia);
+  if (!m) return dia;
+  const [anio, mes, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const fecha = new Date(Date.UTC(anio, mes - 1, d));
+  if (fecha.getUTCMonth() !== mes - 1) return dia;
+  return `${DIAS_SEMANA[fecha.getUTCDay()]} ${d} ${MESES[mes - 1]} ${anio}`;
+}
+
+// Encabezados del detalle y del «Total por cuenta»: nombre claro y, al
+// pasar el mouse, qué es y de dónde sale cada número.
+export const AYUDA_COLUMNAS: Record<string, string> = {
+  Ventas: "Cuántas ventas (órdenes) hubo.",
+  Recaudo: "Lo que pagó el comprador por las ventas.",
+  "Comisión ML": "Lo que cobra Mercado Libre por cada venta.",
+  "Flete ML": "Lo que Mercado Libre te descuenta por el envío.",
+  Costo: "Costo del producto según la Tabla maestra de SKU.",
+  Packing: "Empaque, cobrado una vez por paquete (Tabla maestra o proveedor).",
+  Envío: "Envío por agencia o valor Flex de la Tabla maestra. $0 en Full.",
+  Utilidad: "Recaudo − Comisión ML − Flete ML − Costo − Packing − Envío. Antes de publicidad.",
+  Margen: "Utilidad ÷ Recaudo de las ventas que tienen costo.",
+  "% comisión": "Comisión ML ÷ Recaudo, sin flete.",
+  Unidades: "Cuántas unidades se vendieron.",
+  "% con costo": "Qué parte de las ventas tiene costo cargado.",
+};

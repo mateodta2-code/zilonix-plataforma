@@ -300,7 +300,7 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Tabla maestra de SKU: carga costo, packing, envío de agencia y precio mínimo de cada SKU (a mano o importando).",
           "Proveedores y transportadores: el packing se pone una vez y cada SKU lo toma de su proveedor.",
-          "Ventas y utilidad: la utilidad de cada venta antes de publicidad (recaudo − comisión − flete − costo − packing − envío). Filtra por fechas hasta 3 meses (92 días) de una vez.",
+          "Ventas y utilidad: la utilidad de cada venta antes de publicidad (recaudo − comisión − flete − costo − packing − envío). Filtra por fechas hasta 3 meses (92 días) de una vez. En el detalle, pasa el mouse por el nombre de cada columna para ver qué es; la utilidad sale en verde si ganas y en rojo si pierdes, y en una venta «falta costo» el link «Cargar costo» te lleva a la Tabla maestra con ese SKU.",
           "Falabella: carga el reporte y concilia cada corte de pago.",
         ],
         consejos: [

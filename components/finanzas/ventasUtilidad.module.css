@@ -289,38 +289,54 @@
   overflow: hidden;
 }
 
-/* Línea 1: el título usa todo lo que dejan los chips; los chips no
-   ceden y van pegados al título. */
-.filaTituloProducto {
+/* 27-nov: el título entero en hasta 2 líneas (antes 1 con «…»); si aún
+   no cabe, «…» al final de la segunda. Entero en el title. */
+.tituloProducto {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* Última línea: forma de entrega (chip), SKU y número de pedido. */
+.filaDatosProducto {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
+  gap: 6px;
+  overflow: hidden;
   white-space: nowrap;
 }
 
-.filaTituloProducto > * {
+.filaDatosProducto > * {
   flex: none;
 }
 
-.filaTituloProducto > .tituloProducto {
-  flex: 0 1 auto;
-  min-width: 0;
+/* Utilidad y margen: verde si gana, rojo si pierde. */
+.positivo {
+  color: var(--exito-texto);
 }
 
-.tituloProducto {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
+.negativo {
+  color: var(--peligro-texto);
 }
 
-/* Línea 2: SKU y número de pedido, chicos y suaves. */
-.filaDatosProducto {
-  display: flex;
-  gap: 8px;
-  overflow: hidden;
-  white-space: nowrap;
+/* Encabezado con explicación al pasar el mouse. */
+.encabezadoAyuda {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* Fórmula de la utilidad, encima del detalle. */
+.formula {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
 }
 
 /* Issue #131 — acordeón del detalle (TablaDetalleAcordeon.tsx), como
