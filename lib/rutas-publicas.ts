@@ -52,6 +52,8 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // página de aceptar invitación: el token en la URL es el permiso.
   "/bodega/iniciar-sesion(.*)",
   "/domiciliario/iniciar-sesion(.*)",
+  // Autorregistro del domiciliario: aún no tiene sesión; /crear-perfil sí la exige.
+  "/domiciliario/registro(.*)",
   "/invitacion-bodega(.*)",
   "/empezar",
   // Tarea 1.7 — quien recibe una invitación por correo todavía no

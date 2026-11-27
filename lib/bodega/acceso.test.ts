@@ -66,3 +66,30 @@ describe("matriz de permisos", () => {
     for (const p of PERMISOS_BODEGA.filter((x) => /invitar|desactivar|rol|NIT/i.test(x.capacidad))) expect(p.roles).toEqual(["admin_bodega"]);
   });
 });
+
+describe("decidirAcceso — «en espera» del domiciliario con perfil", () => {
+  it("con perfil y sin membresías: en-espera (sin perfil sigue sin-membresia)", () => {
+    expect(decidirAcceso({ panel: "domiciliario", membresias: [], tienePerfilDomiciliario: true })).toEqual({ ok: false, motivo: "en-espera" });
+    expect(decidirAcceso({ panel: "domiciliario", membresias: [], tienePerfilDomiciliario: false })).toEqual({ ok: false, motivo: "sin-membresia" });
+  });
+
+  it("un admin o operario de bodega con perfil queda en-espera en /domiciliario, y sigue entrando a /bodega", () => {
+    for (const rol of ["admin_bodega", "operario"] as const) {
+      expect(decidirAcceso({ panel: "domiciliario", membresias: [con({ rol })], tienePerfilDomiciliario: true })).toEqual({ ok: false, motivo: "en-espera" });
+      expect(decidirAcceso({ panel: "bodega", membresias: [con({ rol })], tienePerfilDomiciliario: true }).ok).toBe(true);
+    }
+  });
+
+  it("con membresía activa de domiciliario entra normal aunque tenga perfil", () => {
+    expect(decidirAcceso({ panel: "domiciliario", membresias: [con({ rol: "domiciliario" })], tienePerfilDomiciliario: true }).ok).toBe(true);
+  });
+
+  it("el perfil no esconde una bodega suspendida ni un acceso desactivado", () => {
+    expect(decidirAcceso({ panel: "domiciliario", membresias: [con({ rol: "domiciliario", bodegaEstado: "suspendida" })], tienePerfilDomiciliario: true })).toMatchObject({ ok: false, motivo: "suspendida" });
+    expect(decidirAcceso({ panel: "domiciliario", membresias: [con({ rol: "domiciliario", activo: false })], tienePerfilDomiciliario: true })).toMatchObject({ ok: false, motivo: "desactivado" });
+  });
+
+  it("en el panel de bodega el perfil no cambia nada", () => {
+    expect(decidirAcceso({ panel: "bodega", membresias: [], tienePerfilDomiciliario: true })).toEqual({ ok: false, motivo: "sin-membresia" });
+  });
+});
