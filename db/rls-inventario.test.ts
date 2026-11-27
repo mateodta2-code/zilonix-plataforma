@@ -7,6 +7,9 @@ import {
   configuracionInventario,
   kardexMovimientos,
   ordenCompraItems,
+  pedidoItems,
+  pedidos,
+  pedidosFinanzas,
   ordenesCompra,
   recepcionItems,
   recepciones,
@@ -15,6 +18,7 @@ import {
   syncStockMl,
 } from "./schema";
 import { crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
+import { crearCuentaMlDePrueba } from "./test-utils/venta";
 import { crearBodega } from "../lib/inventario/bodegas";
 import { crearOrdenCompra, registrarRecepcion } from "../lib/inventario/compras";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
@@ -30,6 +34,33 @@ import { randomUUID } from "crypto";
 async function crearSku(empresaId: string, codigo: string): Promise<string> {
   const [fila] = await dbComoEmpresa(empresaId, (tx) => tx.insert(skus).values({ empresaId, codigo, nombre: codigo }).returning({ id: skus.id }));
   return fila.id;
+}
+
+// Una venta de hoy (dentro de la ventana de 30 días) con una línea del
+// SKU dado. La línea guarda sku_id con una FK simple: la base deja que
+// B apunte al id de un SKU de A, por eso el conteo no puede fiarse del
+// sku_id solo.
+async function crearVentaHoy(empresaId: string, skuId: string, cantidad: number): Promise<void> {
+  const cuentaMlId = await crearCuentaMlDePrueba(empresaId);
+  await dbComoEmpresa(empresaId, async (tx) => {
+    const [pedido] = await tx
+      .insert(pedidos)
+      .values({ empresaId, cuentaMlId, pedidoIdExterno: `orden-${randomUUID()}`, fecha: new Date(), total: "1000.00", moneda: "COP", estado: "paid" })
+      .returning({ id: pedidos.id });
+    await tx.insert(pedidosFinanzas).values({ empresaId, pedidoId: pedido.id, cuentaMlId, valorVenta: "1000.00", formaEntrega: "agencia" });
+    await tx.insert(pedidoItems).values({
+      empresaId,
+      pedidoId: pedido.id,
+      linea: 1,
+      itemIdExterno: "MCO1",
+      skuCodigo: "INV-A",
+      skuId,
+      cantidad,
+      precioUnitario: "1000.00",
+      valorLinea: "1000.00",
+      titulo: "Producto",
+    });
+  });
 }
 
 describe("inventario (RLS, issue #280)", () => {
@@ -192,6 +223,13 @@ describe("inventario (RLS, issue #280)", () => {
     expect((await listarKardexParaExportar(c.empresaBId)).filas.filter((f) => f.skuCodigo === "INV-A")).toHaveLength(0);
     expect((await listarKardexParaExportar(c.empresaBId, { skuId: skuA })).filas).toHaveLength(0);
     expect((await listarKardexParaExportar(c.empresaBId, { bodegaId: bodegaA })).filas).toHaveLength(0);
+  });
+
+  it("días de stock: las ventas de B nunca suman a A, ni apuntando al SKU de A", async () => {
+    await crearVentaHoy(c.empresaAId, skuA, 2);
+    await crearVentaHoy(c.empresaBId, skuA, 5);
+    const deA = await listarInventarioParaExportar(c.empresaAId, { busqueda: "INV-A" });
+    expect(deA.filas.find((f) => f.skuId === skuA)?.vendidas30).toBe(2);
   });
 
   it("los topes del CSV marcan recortado", async () => {

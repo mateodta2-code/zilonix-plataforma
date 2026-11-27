@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   agruparSaldosPorTipo,
+  calcularDiasStock,
+  textoDiasStock,
   aplicarDelta,
   CantidadInvalidaError,
   cantidadAPublicar,
@@ -142,5 +144,32 @@ describe("agruparSaldosPorTipo", () => {
 
   it("sin bodegas, los tres tipos quedan en 0 (nunca faltan)", () => {
     expect(agruparSaldosPorTipo([])).toEqual({ propia: 0, fulfillment_ml: 0, tercero: 0 });
+  });
+});
+
+describe("calcularDiasStock", () => {
+  it("sin ventas en 30 días: null (nunca infinito)", () => {
+    expect(calcularDiasStock(10, 0)).toBeNull();
+    expect(calcularDiasStock(0, 0)).toBeNull();
+  });
+
+  it("Para ML en 0 con ventas: 0 días", () => {
+    expect(calcularDiasStock(0, 5)).toBe(0);
+  });
+
+  it("caso normal: 30 publicadas y 15 vendidas en 30 días alcanzan 60 días", () => {
+    expect(calcularDiasStock(30, 15)).toBe(60);
+  });
+
+  it("redondea hacia abajo, sin error de coma flotante", () => {
+    expect(calcularDiasStock(10, 7)).toBe(42); // 42,86
+    expect(calcularDiasStock(10, 3)).toBe(100); // 0,1 por día: exacto, no 99
+  });
+
+  it("más de 365 días se muestra como +365", () => {
+    expect(calcularDiasStock(500, 1)).toBe(15000);
+    expect(textoDiasStock(calcularDiasStock(500, 1))).toBe("+365");
+    expect(textoDiasStock(365)).toBe("365");
+    expect(textoDiasStock(null)).toBe("sin ventas");
   });
 });
