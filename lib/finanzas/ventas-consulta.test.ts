@@ -160,8 +160,9 @@ describe("ventas y utilidad, solo lectura (issue #131 Parte A)", () => {
     expect(conRota.rechazadas.map((r) => r.pedidoId)).toContain(rota.pedidoId);
     expect(pedidosDelDetalle(conRota.detalle)).not.toContain(rota.pedidoId);
 
+    // Tope de la consulta = el de Finanzas (92 días, 27-nov): 93 se rechaza.
     await expect(
-      listarVentasUtilidad(empresaId, usuarioId, { cuentaId: null, desde: new Date("2026-09-01T05:00:00Z"), hastaExclusivo: new Date("2026-10-03T05:00:00Z") })
+      listarVentasUtilidad(empresaId, usuarioId, { cuentaId: null, desde: new Date("2026-07-01T05:00:00Z"), hastaExclusivo: new Date("2026-10-02T05:00:00Z") })
     ).rejects.toBeInstanceOf(RangoVentasInvalidoError);
   });
 });
