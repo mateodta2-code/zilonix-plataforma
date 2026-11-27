@@ -44,6 +44,24 @@ export async function dbComoUsuarioBodega<T>(usuarioId: string, fn: (tx: typeof 
   });
 }
 
+// Autorregistro (Registro-0): la persona crea SU bodega y se vuelve su
+// admin_bodega en una sola transacción. Fija la bodega NUEVA (id generado en
+// código con randomUUID(), sin depender de INSERT ... RETURNING) y el rol
+// admin_bodega. Las políticas bodega3pl_autorregistro y
+// miembro3pl_admin_autorregistro limitan el permiso: una bodega por persona,
+// estado activa y un único admin (ella) mientras la bodega no tenga miembros.
+export async function dbComoAutorregistroBodega<T>(usuarioId: string, bodegaIdNueva: string, fn: (tx: typeof db) => Promise<T>): Promise<T> {
+  if (!UUID_RE.test(usuarioId)) throw new Error(`usuarioId inválido: "${usuarioId}" no es un UUID.`);
+  if (!UUID_RE.test(bodegaIdNueva)) throw new Error(`bodegaIdNueva inválido: "${bodegaIdNueva}" no es un UUID.`);
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.empresa_actual', ${EMPRESA_SENTINEL}, true)`);
+    await tx.execute(sql`SELECT set_config('app.bodega_usuario_id', ${usuarioId}, true)`);
+    await tx.execute(sql`SELECT set_config('app.bodega_id', ${bodegaIdNueva}, true)`);
+    await tx.execute(sql`SELECT set_config('app.bodega_rol', 'admin_bodega', true)`);
+    return fn(tx as unknown as typeof db);
+  });
+}
+
 // Quien tiene el token ve y acepta esa invitación puntual (mismo
 // principio que dbComoInvitacion): el secreto en la URL es el permiso.
 // usuarioId es opcional — la vista previa no lo necesita, aceptar sí.

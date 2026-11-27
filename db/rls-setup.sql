@@ -1183,6 +1183,114 @@ DROP POLICY IF EXISTS auditoria_bodega_leer ON auditoria;
 CREATE POLICY auditoria_bodega_leer ON auditoria FOR SELECT TO app_user
   USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
 
+-- Autorregistro (Registro-0): una persona crea SU bodega y se vuelve su único
+-- admin_bodega. El INSERT exige origen autorregistro, estado activa,
+-- creado_por = la persona e id = la bodega fijada por
+-- dbComoAutorregistroBodega. No depender de RETURNING (el id se genera en
+-- código). Una sola por persona: índice único parcial.
+GRANT INSERT ON bodegas_3pl TO app_user;
+DROP POLICY IF EXISTS bodega3pl_autorregistro ON bodegas_3pl;
+CREATE POLICY bodega3pl_autorregistro ON bodegas_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    origen = 'autorregistro'
+    AND estado = 'activa'
+    AND creado_por = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+    AND id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+  );
+
+-- Primer admin de una bodega autorregistrada: solo ella misma, solo admin y
+-- solo mientras la bodega no tenga ningún miembro (nadie se hace admin de una
+-- bodega ajena ni agrega un segundo admin por esta vía).
+-- La comprobación lee bodegas_3pl y miembros_bodega_3pl. Hecha como subconsulta
+-- dentro de la política de miembros_bodega_3pl, Postgres detecta recursión
+-- infinita (la propia tabla, y bodega3pl_ver que vuelve a miembros). Por eso va
+-- en una función SECURITY DEFINER mínima: solo lectura, devuelve un booleano,
+-- search_path fijo y sin GRANT a PUBLIC (mismo patrón que las funciones de
+-- superadmin_*; el dueño no queda sujeto a las políticas).
+CREATE OR REPLACE FUNCTION bodega3pl_autorregistro_sin_miembros(p_bodega uuid, p_usuario uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $fn$
+  SELECT EXISTS (
+      SELECT 1 FROM bodegas_3pl b
+      WHERE b.id = p_bodega AND b.origen = 'autorregistro' AND b.creado_por = p_usuario
+    )
+    AND NOT EXISTS (SELECT 1 FROM miembros_bodega_3pl m WHERE m.bodega_id = p_bodega)
+$fn$;
+REVOKE ALL ON FUNCTION bodega3pl_autorregistro_sin_miembros(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION bodega3pl_autorregistro_sin_miembros(uuid, uuid) TO app_user;
+
+DROP POLICY IF EXISTS miembro3pl_admin_autorregistro ON miembros_bodega_3pl;
+CREATE POLICY miembro3pl_admin_autorregistro ON miembros_bodega_3pl FOR INSERT TO app_user
+  WITH CHECK (
+    rol = 'admin_bodega'
+    AND usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+    AND bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND bodega3pl_autorregistro_sin_miembros(bodega_id, usuario_id)
+  );
+
+-- perfiles_domiciliario: cada persona solo ve, crea y edita (nombre, teléfono,
+-- ciudad) SU fila; nada se borra. El superadmin solo cuenta (SELECT).
+ALTER TABLE perfiles_domiciliario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE perfiles_domiciliario FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT ON perfiles_domiciliario TO app_user;
+REVOKE UPDATE, DELETE ON perfiles_domiciliario FROM app_user;
+GRANT UPDATE (nombre, telefono, ciudad) ON perfiles_domiciliario TO app_user;
+GRANT SELECT ON perfiles_domiciliario TO superadmin_user;
+DROP POLICY IF EXISTS perfil_domiciliario_ver ON perfiles_domiciliario;
+CREATE POLICY perfil_domiciliario_ver ON perfiles_domiciliario FOR SELECT TO app_user
+  USING (usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid);
+DROP POLICY IF EXISTS perfil_domiciliario_crear ON perfiles_domiciliario;
+CREATE POLICY perfil_domiciliario_crear ON perfiles_domiciliario FOR INSERT TO app_user
+  WITH CHECK (usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid);
+DROP POLICY IF EXISTS perfil_domiciliario_editar ON perfiles_domiciliario;
+CREATE POLICY perfil_domiciliario_editar ON perfiles_domiciliario FOR UPDATE TO app_user
+  USING (usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid)
+  WITH CHECK (usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid);
+DROP POLICY IF EXISTS sa_perfil_domiciliario_ver ON perfiles_domiciliario;
+CREATE POLICY sa_perfil_domiciliario_ver ON perfiles_domiciliario FOR SELECT TO superadmin_user USING (true);
+
+-- sedes_bodega: varias sedes por bodega. Todos los miembros de la bodega las
+-- leen; solo el admin_bodega crea y edita (nombre, dirección, ciudad, activa);
+-- nada se borra. El superadmin solo cuenta (SELECT).
+ALTER TABLE sedes_bodega ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sedes_bodega FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT ON sedes_bodega TO app_user;
+REVOKE UPDATE, DELETE ON sedes_bodega FROM app_user;
+GRANT UPDATE (nombre, direccion, ciudad, activa) ON sedes_bodega TO app_user;
+GRANT SELECT ON sedes_bodega TO superadmin_user;
+DROP POLICY IF EXISTS sede_bodega_ver ON sedes_bodega;
+CREATE POLICY sede_bodega_ver ON sedes_bodega FOR SELECT TO app_user
+  USING (bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid);
+DROP POLICY IF EXISTS sede_bodega_crear ON sedes_bodega;
+CREATE POLICY sede_bodega_crear ON sedes_bodega FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  );
+DROP POLICY IF EXISTS sede_bodega_editar ON sedes_bodega;
+CREATE POLICY sede_bodega_editar ON sedes_bodega FOR UPDATE TO app_user
+  USING (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  )
+  WITH CHECK (
+    bodega_id = NULLIF(current_setting('app.bodega_id', true), '')::uuid
+    AND current_setting('app.bodega_rol', true) = 'admin_bodega'
+  );
+DROP POLICY IF EXISTS sa_sede_bodega_ver ON sedes_bodega;
+CREATE POLICY sa_sede_bodega_ver ON sedes_bodega FOR SELECT TO superadmin_user USING (true);
+
+-- auditoria del perfil de domiciliario: aún no pertenece a ninguna bodega ni
+-- empresa; solo se escribe la propia acción de la persona.
+DROP POLICY IF EXISTS auditoria_perfil_domiciliario_escribir ON auditoria;
+CREATE POLICY auditoria_perfil_domiciliario_escribir ON auditoria FOR INSERT TO app_user
+  WITH CHECK (
+    bodega_id IS NULL AND empresa_id IS NULL
+    AND entidad = 'perfil_domiciliario'
+    AND usuario_id = NULLIF(current_setting('app.bodega_usuario_id', true), '')::uuid
+  );
+
 -- superadmin_user: crea y suspende/reactiva bodegas, ve sus miembros (conteos)
 -- e invita SOLO al admin_bodega. No edita miembros ni lee auditoria.
 GRANT SELECT, INSERT ON bodegas_3pl TO superadmin_user;

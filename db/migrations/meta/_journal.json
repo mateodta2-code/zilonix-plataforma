@@ -400,6 +400,13 @@
       "when": 1795736536757,
       "tag": "0056_sharp_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795741837165,
+      "tag": "0057_quick_justice",
+      "breakpoints": true
     }
   ]
 }
