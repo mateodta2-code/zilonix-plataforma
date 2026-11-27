@@ -7,6 +7,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro, normalizarTextoBusqueda } from "@/lib/filtros-listado";
 import { listarPublicacionesSinSku, listarSkusFiltrados, TIPOS_SKU_FILTRO } from "@/lib/ml/sku";
+import { stockPorBodegaDeSkus } from "@/lib/inventario/stock";
 import { crearSkuAction } from "./actions";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -68,6 +69,11 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
     listarSkusFiltrados(empresa.id, { busqueda: filtros.q, estado: filtros.estado, orden: filtros.orden, pagina: normalizarParametro(searchParams.pagina) }),
     listarPublicacionesSinSku(empresa.id),
   ]);
+  // Issue #280 — stock solo de los 25 SKU de esta página.
+  const stock = await stockPorBodegaDeSkus(
+    empresa.id,
+    resultado.skus.map((s) => s.id)
+  );
 
   // Un ?q= que queda vacío después de trim no cuenta como filtro: si
   // no, con cero SKUs reales la pantalla diría "ninguno coincide" en
@@ -80,6 +86,7 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
     <>
       <EncabezadoPagina
         titulo="SKU"
+        descripcion='"De terceros" son tus bodegas de tipo tercero; el stock del panel de la bodega 3PL todavía no se suma acá.'
         accion={
           <BotonLink href="/panel/publicar" variante="primario">
             Publicar en Mercado Libre
@@ -164,8 +171,24 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
         </EstadoVacio>
       ) : (
         <>
-          <Tabla encabezados={["Código", "Nombre", "Tipo"]}>
-            {resultado.skus.map((sku) => (
+          <Tabla
+            encabezados={[
+              "Código",
+              "Nombre",
+              "Tipo",
+              { clave: "disponible", contenido: "Disponible", numerica: true },
+              { clave: "propia", contenido: "Propia", numerica: true },
+              { clave: "full", contenido: "Full", numerica: true },
+              { clave: "terceros", contenido: "De terceros", numerica: true },
+            ]}
+          >
+            {resultado.skus.map((sku) => {
+              const s = stock.get(sku.id);
+              // Un kit no tiene saldo propio por bodega: igual que en
+              // /panel/inventario, sus columnas por tipo dicen "—".
+              const porTipo = (n: number | undefined) => (sku.esKit ? "—" : (n ?? 0));
+              const conSaldo = s?.porBodega.filter((b) => b.disponible !== 0) ?? [];
+              return (
               <FilaTabla key={sku.id}>
                 <CeldaTabla>
                   <strong><SkuCopiable sku={sku.codigo} /></strong>
@@ -175,8 +198,24 @@ export default async function SkuPage({ searchParams }: { searchParams: Record<s
                   {sku.nombreBase && <span className={styles.detalleSku}> ({sku.nombreBase})</span>}
                 </CeldaTabla>
                 <CeldaTabla>{sku.esKit ? <Chip>Kit</Chip> : <Chip estado="neutro">Simple</Chip>}</CeldaTabla>
+                <CeldaTabla numerica>
+                  <strong className={styles.numero}>{s?.totalDisponible ?? 0}</strong>
+                  {sku.esKit ? (
+                    <div className={styles.detalleBodegas}>para armar</div>
+                  ) : (
+                    conSaldo.length > 0 && (
+                      <div className={styles.detalleBodegas}>
+                        {conSaldo.map((b) => `${b.nombre} ${b.disponible}`).join(" · ")}
+                      </div>
+                    )
+                  )}
+                </CeldaTabla>
+                <CeldaTabla numerica className={styles.numero}>{porTipo(s?.porTipo.propia)}</CeldaTabla>
+                <CeldaTabla numerica className={styles.numero}>{porTipo(s?.porTipo.fulfillment_ml)}</CeldaTabla>
+                <CeldaTabla numerica className={styles.numero}>{porTipo(s?.porTipo.tercero)}</CeldaTabla>
               </FilaTabla>
-            ))}
+              );
+            })}
           </Tabla>
 
           <div className={styles.paginacion}>

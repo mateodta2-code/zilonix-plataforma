@@ -2,7 +2,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-o
 import type { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { bodegas, kardexMovimientos, kitComponentes, skus, stockBodega, usuarios } from "@/db/schema";
-import { stockDerivadoKit } from "@/lib/inventario/calculos";
+import { agruparSaldosPorTipo, stockDerivadoKit, type SaldoPorTipo, type TipoBodega } from "@/lib/inventario/calculos";
 import { escaparComodinesLike, normalizarTextoBusqueda } from "@/lib/filtros-listado";
 
 // Issue #280 — lecturas del inventario (nunca escriben: eso es solo
@@ -121,6 +121,62 @@ export async function listarInventario(
       };
     });
     return { filas, total: Number(total), pagina, totalPaginas };
+  });
+}
+
+export type BodegaConSaldo = { bodegaId: string; nombre: string; tipo: TipoBodega; disponible: number };
+export type StockDeSku = {
+  esKit: boolean;
+  // Simple: suma de las bodegas mostradas. Kit: cuántos se pueden armar
+  // (disponiblePublicadoTx); un kit no tiene saldo propio por bodega.
+  totalDisponible: number;
+  porTipo: SaldoPorTipo;
+  porBodega: BodegaConSaldo[];
+};
+
+// Issue #280 — stock de los SKU de UNA página de /panel/sku (nunca de
+// toda la empresa), partido por bodega y por tipo. Mismas bodegas que
+// /panel/inventario: las activas, más las desactivadas que todavía
+// tienen saldo (si no, ese stock "desaparecería" de la suma). Solo
+// lectura: el stock solo lo escribe aplicarMovimientos.
+export async function stockPorBodegaDeSkus(empresaId: string, skuIds: string[]): Promise<Map<string, StockDeSku>> {
+  const resultado = new Map<string, StockDeSku>();
+  if (skuIds.length === 0) return resultado;
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const info = await tx
+      .select({ id: skus.id, esKit: skus.esKit })
+      .from(skus)
+      .where(and(eq(skus.empresaId, empresaId), inArray(skus.id, skuIds)));
+    const saldos = await tx
+      .select({
+        skuId: stockBodega.skuId,
+        bodegaId: stockBodega.bodegaId,
+        nombre: bodegas.nombre,
+        tipo: bodegas.tipo,
+        activa: bodegas.activa,
+        disponible: stockBodega.disponible,
+        reservado: stockBodega.reservado,
+      })
+      .from(stockBodega)
+      .innerJoin(bodegas, and(eq(bodegas.empresaId, stockBodega.empresaId), eq(bodegas.id, stockBodega.bodegaId)))
+      .where(and(eq(stockBodega.empresaId, empresaId), inArray(stockBodega.skuId, skuIds)))
+      .orderBy(asc(bodegas.nombre));
+    const kitIds = info.filter((s) => s.esKit).map((s) => s.id);
+    const armables = await disponiblePublicadoTx(tx, empresaId, kitIds);
+    for (const s of info) {
+      const porBodega: BodegaConSaldo[] = s.esKit
+        ? []
+        : saldos
+            .filter((x) => x.skuId === s.id && (x.activa || x.disponible !== 0 || x.reservado !== 0))
+            .map((x) => ({ bodegaId: x.bodegaId, nombre: x.nombre, tipo: x.tipo, disponible: x.disponible }));
+      resultado.set(s.id, {
+        esKit: s.esKit,
+        totalDisponible: s.esKit ? (armables.get(s.id) ?? 0) : porBodega.reduce((n, b) => n + b.disponible, 0),
+        porTipo: agruparSaldosPorTipo(porBodega),
+        porBodega,
+      });
+    }
+    return resultado;
   });
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agruparSaldosPorTipo,
   aplicarDelta,
   CantidadInvalidaError,
   cantidadAPublicar,
@@ -124,5 +125,22 @@ describe("motivoDeItem y esUuid", () => {
     expect(esUuid("8b1c7a52-3c2e-4d4a-9f3e-0a1b2c3d4e5f")).toBe(true);
     expect(esUuid("1; drop table skus")).toBe(false);
     expect(esUuid(undefined)).toBe(false);
+  });
+});
+
+describe("agruparSaldosPorTipo", () => {
+  it("suma el disponible por tipo de bodega", () => {
+    expect(
+      agruparSaldosPorTipo([
+        { tipo: "propia", disponible: 3 },
+        { tipo: "propia", disponible: 2 },
+        { tipo: "fulfillment_ml", disponible: 4 },
+        { tipo: "tercero", disponible: 1 },
+      ])
+    ).toEqual({ propia: 5, fulfillment_ml: 4, tercero: 1 });
+  });
+
+  it("sin bodegas, los tres tipos quedan en 0 (nunca faltan)", () => {
+    expect(agruparSaldosPorTipo([])).toEqual({ propia: 0, fulfillment_ml: 0, tercero: 0 });
   });
 });
