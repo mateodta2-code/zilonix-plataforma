@@ -7,7 +7,7 @@ import { normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarBodegas } from "@/lib/inventario/bodegas";
 import { instruccionAlerta, listarAlertasPendientes } from "@/lib/inventario/alertas";
 import { leerConfiguracionInventario } from "@/lib/inventario/configuracion";
-import { cantidadAPublicar } from "@/lib/inventario/calculos";
+import { calcularDiasStock, cantidadAPublicar, textoDiasStock } from "@/lib/inventario/calculos";
 import { listarInventario, listarSkusConStock, TAMANO_PAGINA_INVENTARIO } from "@/lib/inventario/stock";
 import { ajustarStockAction, resolverAlertaAction, trasladarStockAction } from "./actions";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
@@ -56,7 +56,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
     <>
       <EncabezadoPagina
         titulo="Inventario"
-        descripcion={`Stock por bodega. "Para ML" es lo que se publica: disponible de las bodegas que suman, menos un colchón de ${config.bufferMl}.`}
+        descripcion={`Stock por bodega. "Para ML" es lo que se publica: disponible de las bodegas que suman, menos un colchón de ${config.bufferMl}. "Días de stock" es para cuántos días alcanza, según lo vendido en ML en los últimos 30 días.`}
       />
       <AvisosUrl searchParams={searchParams} />
 
@@ -168,7 +168,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
         <EstadoVacio>{q ? "Ningún SKU coincide con esa búsqueda." : "Todavía no hay SKU. Créalos en la pantalla de SKU."}</EstadoVacio>
       ) : (
         <>
-          <Tabla encabezados={["SKU", ...columnas.map((b) => b.nombre), "Reservado", "Para ML", "Kardex"]}>
+          <Tabla encabezados={["SKU", ...columnas.map((b) => b.nombre), "Reservado", "Para ML", "Días de stock", "Kardex"]}>
             {resultado.filas.map((f) => (
               <FilaTabla key={f.skuId}>
                 <CeldaTabla>
@@ -186,6 +186,9 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
                 <CeldaTabla className={styles.numero}>{f.esKit ? "—" : f.totalReservado}</CeldaTabla>
                 <CeldaTabla className={styles.numero}>
                   <strong>{cantidadAPublicar(f.publicable, config.bufferMl)}</strong>
+                </CeldaTabla>
+                <CeldaTabla className={styles.numero}>
+                  <DiasStock esKit={f.esKit} paraMl={cantidadAPublicar(f.publicable, config.bufferMl)} vendidas30={f.vendidas30} />
                 </CeldaTabla>
                 <CeldaTabla>
                   {!f.esKit && (
@@ -218,6 +221,14 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
       )}
     </>
   );
+}
+
+// Un kit no tiene ritmo propio: sus ventas ya suman a los componentes.
+function DiasStock({ esKit, paraMl, vendidas30 }: { esKit: boolean; paraMl: number; vendidas30: number }) {
+  if (esKit) return <>—</>;
+  const dias = calcularDiasStock(paraMl, vendidas30);
+  if (dias === null) return <span className={styles.detalle}>{textoDiasStock(dias)}</span>;
+  return <span title={`${vendidas30} vendida(s) en ML en los últimos 30 días (sin Full ni canceladas)`}>{textoDiasStock(dias)}</span>;
 }
 
 function SelectorSku({ skus }: { skus: { id: string; codigo: string; nombre: string }[] }) {

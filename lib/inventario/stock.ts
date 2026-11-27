@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { bodegas, kardexMovimientos, kitComponentes, skus, stockBodega, usuarios } from "@/db/schema";
+import { bodegas, kardexMovimientos, kitComponentes, pedidoItems, pedidos, pedidosFinanzas, skus, stockBodega, usuarios } from "@/db/schema";
 import { agruparSaldosPorTipo, stockDerivadoKit, type SaldoPorTipo, type TipoBodega } from "@/lib/inventario/calculos";
-import { escaparComodinesLike, normalizarTextoBusqueda } from "@/lib/filtros-listado";
+import { escaparComodinesLike, normalizarTextoBusqueda, rangoUltimosNDiasBogota } from "@/lib/filtros-listado";
+import { ESTADOS_QUE_NO_SON_VENTA } from "@/lib/estados-venta";
 
 // Issue #280 — lecturas del inventario (nunca escriben: eso es solo
 // lib/inventario/movimientos.ts).
@@ -49,6 +50,50 @@ export async function disponiblePublicadoTx(tx: Tx, empresaId: string, skuIds: s
   return resultado;
 }
 
+// Issue #280 (Días de stock) — unidades vendidas en ML por SKU en los
+// últimos 30 días de Bogotá, solo de nuestra base (nunca se llama a
+// ML). Cuenta como venta lo mismo que «Ventas de hoy» en Inicio
+// (ESTADOS_QUE_NO_SON_VENTA), menos las que finanzas marcó canceladas
+// y menos Full: Full sale del inventario de ML, no del nuestro, así que
+// no gasta lo que se publica. Sin fila en pedidos_finanzas, la venta
+// cuenta. Una venta de un kit suma a sus componentes (cantidad vendida
+// × cantidad del componente); la fila del kit no muestra días.
+export async function ventasUltimos30DiasTx(tx: Tx, empresaId: string, skuIds: string[], ahora: Date = new Date()): Promise<Map<string, number>> {
+  const resultado = new Map<string, number>();
+  if (skuIds.length === 0) return resultado;
+  const componentes = await tx
+    .select({ kitId: kitComponentes.skuKitId, skuId: kitComponentes.skuComponenteId, cantidad: kitComponentes.cantidad })
+    .from(kitComponentes)
+    .where(and(eq(kitComponentes.empresaId, empresaId), inArray(kitComponentes.skuComponenteId, skuIds)));
+  const idsVenta = [...new Set([...skuIds, ...componentes.map((c) => c.kitId)])];
+  const { inicio, finExclusivo } = rangoUltimosNDiasBogota(ahora, 30);
+  const vendidas = await tx
+    .select({ skuId: pedidoItems.skuId, total: sql<number>`coalesce(sum(${pedidoItems.cantidad}), 0)::int` })
+    .from(pedidoItems)
+    .innerJoin(pedidos, and(eq(pedidos.empresaId, pedidoItems.empresaId), eq(pedidos.id, pedidoItems.pedidoId)))
+    .leftJoin(pedidosFinanzas, and(eq(pedidosFinanzas.empresaId, pedidoItems.empresaId), eq(pedidosFinanzas.pedidoId, pedidoItems.pedidoId)))
+    .where(
+      and(
+        eq(pedidoItems.empresaId, empresaId),
+        isNotNull(pedidoItems.skuId),
+        inArray(pedidoItems.skuId, idsVenta),
+        gte(pedidos.fecha, inicio),
+        lt(pedidos.fecha, finExclusivo),
+        notInArray(pedidos.estado, ESTADOS_QUE_NO_SON_VENTA),
+        // Sin cabecera (LEFT JOIN vacío) la venta cuenta.
+        or(isNull(pedidosFinanzas.id), and(eq(pedidosFinanzas.cancelada, false), ne(pedidosFinanzas.formaEntrega, "full_ml")))
+      )
+    )
+    .groupBy(pedidoItems.skuId);
+  const porSku = new Map(vendidas.map((v) => [v.skuId as string, Number(v.total)]));
+  for (const id of skuIds) resultado.set(id, porSku.get(id) ?? 0);
+  for (const c of componentes) {
+    const deKit = porSku.get(c.kitId) ?? 0;
+    if (deKit > 0) resultado.set(c.skuId, (resultado.get(c.skuId) ?? 0) + deKit * c.cantidad);
+  }
+  return resultado;
+}
+
 export async function disponiblePublicado(empresaId: string, skuIds: string[]): Promise<Map<string, number>> {
   return dbComoEmpresa(empresaId, (tx) => disponiblePublicadoTx(tx, empresaId, skuIds));
 }
@@ -64,6 +109,8 @@ export type FilaInventario = {
   totalReservado: number;
   // Lo que cuenta para ML (sin restar el colchón).
   publicable: number;
+  // Vendidas en ML en los últimos 30 días (ventasUltimos30DiasTx).
+  vendidas30: number;
 };
 
 export const TAMANO_PAGINA_INVENTARIO = 50;
@@ -124,6 +171,7 @@ async function armarFilasInventarioTx(
         .where(and(eq(stockBodega.empresaId, empresaId), inArray(stockBodega.skuId, ids)))
     : [];
   const publicable = await disponiblePublicadoTx(tx, empresaId, ids);
+  const vendidas = await ventasUltimos30DiasTx(tx, empresaId, ids);
   // Agrupado una vez por SKU: con 20.000 SKU del CSV, un filter por
   // fila sería cuadrático.
   const saldosPorSku = new Map<string, SaldoEnBodega[]>();
@@ -143,6 +191,7 @@ async function armarFilasInventarioTx(
       totalDisponible: porBodega.reduce((n, b) => n + b.disponible, 0),
       totalReservado: porBodega.reduce((n, b) => n + b.reservado, 0),
       publicable: publicable.get(s.id) ?? 0,
+      vendidas30: vendidas.get(s.id) ?? 0,
     };
   });
 }
