@@ -174,3 +174,17 @@ export function motivoDeItem(item: ItemMlStock): ResultadoPublicacion | null {
   if (Array.isArray(item.variations) && item.variations.length > 0) return "con_variaciones";
   return null;
 }
+
+// Issue #280 — /panel/sku muestra el stock partido por tipo de bodega
+// (Propia, Full, De terceros). Suma solo el disponible: lo reservado ya
+// está comprometido con un pedido y no se ofrece. Los tres tipos salen
+// siempre (en 0 si no hay), para que la tabla diga "0" y no quede vacía.
+export const TIPOS_BODEGA = ["propia", "fulfillment_ml", "tercero"] as const;
+export type TipoBodega = (typeof TIPOS_BODEGA)[number];
+export type SaldoPorTipo = Record<TipoBodega, number>;
+
+export function agruparSaldosPorTipo(saldos: { tipo: TipoBodega; disponible: number }[]): SaldoPorTipo {
+  const porTipo: SaldoPorTipo = { propia: 0, fulfillment_ml: 0, tercero: 0 };
+  for (const s of saldos) porTipo[s.tipo] += s.disponible;
+  return porTipo;
+}

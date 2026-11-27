@@ -19,6 +19,7 @@ import { crearBodega } from "../lib/inventario/bodegas";
 import { crearOrdenCompra, registrarRecepcion } from "../lib/inventario/compras";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
 import { guardarConfiguracionInventario } from "../lib/inventario/configuracion";
+import { stockPorBodegaDeSkus } from "../lib/inventario/stock";
 import { randomUUID } from "crypto";
 
 // Issue #280 — aislamiento de las tablas de inventario contra Postgres
@@ -162,5 +163,15 @@ describe("inventario (RLS, issue #280)", () => {
         .returning({ id: alertasUltimaUnidad.id })
     );
     expect(resueltasPorB).toHaveLength(0);
+  });
+
+  it("stockPorBodegaDeSkus: B no ve el stock de A ni pasando los skuIds de A", async () => {
+    const deA = await stockPorBodegaDeSkus(c.empresaAId, [skuA]);
+    expect(deA.get(skuA)?.totalDisponible).toBeGreaterThan(0);
+    expect(deA.get(skuA)?.porTipo.propia).toBe(deA.get(skuA)?.totalDisponible);
+    expect(deA.get(skuA)?.porBodega.map((b) => b.bodegaId)).toContain(bodegaA);
+
+    const veB = await stockPorBodegaDeSkus(c.empresaBId, [skuA]);
+    expect(veB.size).toBe(0);
   });
 });

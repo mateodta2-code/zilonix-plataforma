@@ -189,3 +189,23 @@
     margin-left: 0;
   }
 }
+
+/* Issue #280 — columnas de stock: cifras alineadas a la derecha con
+   ancho fijo por dígito (se comparan de un vistazo hacia abajo) y, bajo
+   el total, la línea chica con cada bodega y su cantidad. Solo tokens
+   existentes: se ve igual en tema claro y oscuro. */
+.numero {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.detalleBodegas {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--texto-suave);
+  text-align: right;
+  max-width: 220px;
+  margin-left: auto;
+}
