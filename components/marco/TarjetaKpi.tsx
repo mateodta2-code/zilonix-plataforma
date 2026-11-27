@@ -51,7 +51,13 @@ export function TarjetaKpi({
 
       {tieneValor ? (
         <>
-          <p className={`${styles.valor} zx-texto-plata`}>{valor}</p>
+          {/* 27-nov: la caja mide el ancho de la tarjeta para que la cifra
+              se achique sola en vez de cortarse (TarjetaKpi.module.css). */}
+          <div className={styles.cajaValor}>
+            <p className={`${styles.valor} zx-texto-plata`} title={String(valor)}>
+              {valor}
+            </p>
+          </div>
           {variacion ? (
             <p
               className={styles.variacion}

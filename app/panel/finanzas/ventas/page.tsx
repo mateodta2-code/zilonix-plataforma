@@ -11,7 +11,7 @@ import { Pestanas } from "@/components/marco/Pestanas";
 import styles from "../finanzas.module.css";
 
 // Issue #131 (Z-FIN-09, Parte A) — ventas y utilidad. Filtros por
-// cuenta, rango de días de Bogotá (máximo 92 = 3 meses desde el 27-nov,
+// cuenta, rango de días de Bogotá (máximo 366 = 1 año desde el 27-nov,
 // antes 31; por defecto el mes en curso) y con/sin costo. Sin ícono de quitar y sin lápiz: la corrección
 // manual es la Parte B. La tabla vive en
 // components/finanzas/DetalleDiaCuentaProducto.tsx, la misma que pinta

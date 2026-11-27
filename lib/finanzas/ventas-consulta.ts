@@ -83,7 +83,7 @@ function validarFiltro(filtro: FiltroVentasUtilidad): void {
   }
   if (hastaExclusivo <= desde) throw new RangoVentasInvalidoError("La fecha «hasta» no puede ser anterior a «desde».");
   // Tope de seguridad de la consulta: el mayor que pide alguna pantalla
-  // (Finanzas, 3 meses). Cada pantalla valida antes su propio tope.
+  // (Finanzas, 1 año). Cada pantalla valida antes su propio tope.
   if (hastaExclusivo.getTime() - desde.getTime() > RANGO_MAXIMO_DIAS_FINANZAS * DIA_MS) {
     throw new RangoVentasInvalidoError(`El rango puede tener como máximo ${RANGO_MAXIMO_DIAS_FINANZAS} días.`);
   }

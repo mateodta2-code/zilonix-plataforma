@@ -290,8 +290,12 @@
 }
 
 /* 27-nov: el título entero en hasta 2 líneas (antes 1 con «…»); si aún
-   no cabe, «…» al final de la segunda. Entero en el title. */
+   no cabe, «…» al final de la segunda. Entero en el title. Texto normal
+   (no link azul) y seleccionable para copiarlo. */
 .tituloProducto {
+  color: var(--texto);
+  user-select: text;
+  cursor: text;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -332,8 +336,17 @@
   text-underline-offset: 3px;
 }
 
-/* Fórmula de la utilidad, encima del detalle. */
+/* Nota de la fórmula («Antes de publicidad…»), más suave. */
+.formulaNota {
+  color: var(--plata-oscuro);
+}
+
+/* Fórmula de la utilidad, encima del detalle: sus partes van separadas
+   (sin esto se pegaban: «Recaudo− Comisión», «EnvíoAntes»). */
 .formula {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin: 0 0 8px;
   font-size: 12.5px;
   color: var(--texto-suave);
@@ -638,13 +651,8 @@
 /* Franja de «Lo que ganaste» (Utilidad y Margen). En el encabezado
    fijo va encima de su fondo opaco, para que no se vea la tabla por
    debajo al bajar. */
-.tablaCompacta td.resultado {
-  background-color: var(--acento-suave);
-}
-
-.tablaCompacta th.resultado {
-  background: linear-gradient(var(--acento-suave), var(--acento-suave)), var(--tabla-encabezado-fondo);
-}
+/* Sin fondo azul (pedido del usuario, 27-nov): la franja se ve solo por
+   el color de los números y la línea azul del grupo. */
 
 .tablaCompacta td.resultado {
   font-weight: 700;
@@ -758,4 +766,15 @@
 
 .tablaCompacta .filaProducto:hover td:first-child {
   background: linear-gradient(var(--fila-hover), var(--fila-hover)), var(--tabla-fondo);
+}
+
+/* Número de pedido: abre el detalle de la venta (el título ya no es link). */
+.tablaCompacta .enlacePedido {
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.tablaCompacta .enlacePedido:hover,
+.tablaCompacta .enlacePedido:focus-visible {
+  text-decoration: underline;
 }
