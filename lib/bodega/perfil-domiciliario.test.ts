@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import { and, eq } from "drizzle-orm";
-import { beforeAll, describe, expect, it } from "vitest";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { dbComoUsuarioBodega } from "@/db/bodega-context";
 import { db } from "@/db";
 import { auditoria, perfilesDomiciliario, usuarios } from "@/db/schema";
@@ -25,6 +27,12 @@ describe("crearPerfilDomiciliario", () => {
   const beto = randomUUID();
   const vendedora = randomUUID();
 
+  const clienteDueno = postgres(process.env.DATABASE_URL ?? "", { max: 1 });
+  const dbDueno = drizzle(clienteDueno);
+  afterAll(async () => {
+    await clienteDueno.end();
+  });
+
   beforeAll(async () => {
     await db.insert(usuarios).values([
       { id: ana, email: `perfil-ana-${sufijo}@zilonix.test`, nombre: "Ana" },
@@ -38,7 +46,9 @@ describe("crearPerfilDomiciliario", () => {
     expect(await tienePerfilDomiciliario(ana)).toBe(true);
     const [perfil] = await dbComoUsuarioBodega(ana, (tx) => tx.select().from(perfilesDomiciliario).where(eq(perfilesDomiciliario.id, id)));
     expect(perfil).toMatchObject({ nombre: "Ana Pérez", telefono: "3001234567", ciudad: "Bogotá" });
-    const aud = await db.select().from(auditoria).where(and(eq(auditoria.entidad, "perfil_domiciliario"), eq(auditoria.entidadId, id)));
+    // Se lee con la conexión de dueño: app_user sin empresa ni bodega no puede
+    // consultar auditoria (aislamiento_auditoria castea app.empresa_id vacío a uuid).
+    const aud = await dbDueno.select().from(auditoria).where(and(eq(auditoria.entidad, "perfil_domiciliario"), eq(auditoria.entidadId, id)));
     expect(aud).toHaveLength(1);
     expect(aud[0]).toMatchObject({ accion: "domiciliario_autorregistro", actorTipo: "persona", bodegaId: null, empresaId: null, usuarioId: ana });
     expect(aud[0].detalle ?? "").not.toContain("3001234567");
