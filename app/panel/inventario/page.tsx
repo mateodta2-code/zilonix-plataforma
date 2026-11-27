@@ -10,7 +10,7 @@ import { leerConfiguracionInventario } from "@/lib/inventario/configuracion";
 import { cantidadAPublicar } from "@/lib/inventario/calculos";
 import { listarInventario, listarSkusConStock, TAMANO_PAGINA_INVENTARIO } from "@/lib/inventario/stock";
 import { ajustarStockAction, resolverAlertaAction, trasladarStockAction } from "./actions";
-import { Boton, BotonLink } from "@/components/marco/Boton";
+import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -157,6 +157,10 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
               Limpiar
             </BotonLink>
           )}
+          {/* <a> normal (no Link): es una descarga, no una navegación. */}
+          <a href={`/api/inventario/exportar${q ? `?${new URLSearchParams({ q })}` : ""}`} download className={clasesBoton("secundario", true)}>
+            Descargar CSV
+          </a>
         </div>
       </form>
 

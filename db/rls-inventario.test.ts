@@ -19,7 +19,7 @@ import { crearBodega } from "../lib/inventario/bodegas";
 import { crearOrdenCompra, registrarRecepcion } from "../lib/inventario/compras";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
 import { guardarConfiguracionInventario } from "../lib/inventario/configuracion";
-import { stockPorBodegaDeSkus } from "../lib/inventario/stock";
+import { listarInventarioParaExportar, listarKardexParaExportar, stockPorBodegaDeSkus } from "../lib/inventario/stock";
 import { randomUUID } from "crypto";
 
 // Issue #280 — aislamiento de las tablas de inventario contra Postgres
@@ -173,5 +173,37 @@ describe("inventario (RLS, issue #280)", () => {
 
     const veB = await stockPorBodegaDeSkus(c.empresaBId, [skuA]);
     expect(veB.size).toBe(0);
+  });
+
+  it("listarInventarioParaExportar: B nunca trae SKU de A, ni buscando su código", async () => {
+    const deA = await listarInventarioParaExportar(c.empresaAId);
+    expect(deA.filas.map((f) => f.skuId)).toContain(skuA);
+
+    const todoB = await listarInventarioParaExportar(c.empresaBId);
+    expect(todoB.filas.map((f) => f.skuId)).not.toContain(skuA);
+    const buscandoB = await listarInventarioParaExportar(c.empresaBId, { busqueda: "INV-A" });
+    expect(buscandoB.filas).toHaveLength(0);
+  });
+
+  it("listarKardexParaExportar: B nunca trae movimientos de A, ni pasando el skuId o bodegaId de A", async () => {
+    const deA = await listarKardexParaExportar(c.empresaAId, { skuId: skuA });
+    expect(deA.filas.length).toBeGreaterThan(0);
+
+    expect((await listarKardexParaExportar(c.empresaBId)).filas.filter((f) => f.skuCodigo === "INV-A")).toHaveLength(0);
+    expect((await listarKardexParaExportar(c.empresaBId, { skuId: skuA })).filas).toHaveLength(0);
+    expect((await listarKardexParaExportar(c.empresaBId, { bodegaId: bodegaA })).filas).toHaveLength(0);
+  });
+
+  it("los topes del CSV marcan recortado", async () => {
+    await crearSku(c.empresaAId, "INV-A2");
+    const inv = await listarInventarioParaExportar(c.empresaAId, { busqueda: "INV-A" }, 1);
+    expect(inv.filas).toHaveLength(1);
+    expect(inv.recortado).toBe(true);
+    expect((await listarInventarioParaExportar(c.empresaAId, { busqueda: "INV-A2" }, 1)).recortado).toBe(false);
+
+    // skuA tiene al menos dos movimientos (la entrada y la recepción).
+    const kardex = await listarKardexParaExportar(c.empresaAId, { skuId: skuA }, 1);
+    expect(kardex.filas).toHaveLength(1);
+    expect(kardex.recortado).toBe(true);
   });
 });

@@ -3,7 +3,7 @@ import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarBodegas } from "@/lib/inventario/bodegas";
 import { listarKardex, listarSkusConStock } from "@/lib/inventario/stock";
-import { Boton, BotonLink } from "@/components/marco/Boton";
+import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -55,6 +55,9 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
   const hrefPagina = (p: number) =>
     `/panel/inventario/kardex?${new URLSearchParams({ ...(skuId ? { sku: skuId } : {}), ...(bodegaId ? { bodega: bodegaId } : {}), pagina: String(p) })}`;
 
+  const filtrosExportar = new URLSearchParams({ ...(skuId ? { sku: skuId } : {}), ...(bodegaId ? { bodega: bodegaId } : {}) }).toString();
+  const hrefExportar = `/api/inventario/kardex/exportar${filtrosExportar ? `?${filtrosExportar}` : ""}`;
+
   return (
     <>
       <EncabezadoPagina titulo="Kardex" descripcion="Cada movimiento de stock, con quién lo hizo y el saldo que dejó. No se edita ni se borra." />
@@ -89,6 +92,10 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
               Limpiar
             </BotonLink>
           )}
+          {/* <a> normal (no Link): es una descarga, no una navegación. */}
+          <a href={hrefExportar} download className={clasesBoton("secundario", true)}>
+            Descargar CSV
+          </a>
         </div>
       </form>
 
