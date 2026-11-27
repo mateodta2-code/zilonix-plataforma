@@ -7,13 +7,13 @@ import { hrefVentasUtilidad, porcentajeVentasConCosto, resolverRangoVentas, type
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
+import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
 import { CeldasMontos } from "./CeldasMontos";
 import { TablaDetalleAcordeon } from "./TablaDetalleAcordeon";
-import { mostrarPorcentaje } from "./formato";
+import { AYUDA_COLUMNAS, mostrarPorcentaje } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
 
 // Issue #131 (Parte A) — el «Detalle día a día · cuenta · producto» de
@@ -37,43 +37,43 @@ import estilos from "./ventasUtilidad.module.css";
 // el rango.
 const DIAS_POR_PAGINA = 7;
 
-// Encabezados largos: tabla «Total por cuenta» de Finanzas → Ventas.
-const COLUMNAS = [
-  "Día · cuenta · producto",
-  "Número de ventas",
-  "Recaudo ventas",
-  "Comisión ML",
-  "Flete ML",
-  "Costo producto",
-  "Packing",
-  "Envío agencia",
-  "Devolución",
-  "Utilidad",
-  "% util",
-  "% ML",
-  "Cnt",
-];
+// 27-nov (tabla más clara): nombres completos, el mismo en las dos tablas,
+// y al pasar el mouse qué es cada número (AYUDA_COLUMNAS). Sin «Dev.»:
+// siempre salía «—»; la devolución como concepto aparte vuelve con #164.
+// Antes: Nº ventas, Dev., % util, % ML, Cnt.
+const NOMBRES_COLUMNAS = ["Ventas", "Recaudo", "Comisión ML", "Flete ML", "Costo", "Packing", "Envío", "Utilidad", "Margen", "% comisión", "Unidades"];
 
-// La tabla del detalle es compacta (estilo DETALLE DÍA A DÍA de Zilonix
-// OS) y usa encabezados cortos con el mismo significado:
-// Nº ventas = Número de ventas · Recaudo = Recaudo ventas · Comisión =
-// Comisión ML · Flete = Flete ML · Costo = Costo producto · Envío =
-// Envío agencia · Dev. = Devolución. El resto queda igual.
-const COLUMNAS_CORTAS = [
-  "Día · cuenta · producto",
-  "Nº ventas",
-  "Recaudo",
-  "Comisión",
-  "Flete",
-  "Costo",
-  "Packing",
-  "Envío",
-  "Dev.",
-  "Utilidad",
-  "% util",
-  "% ML",
-  "Cnt",
-];
+// Utilidad y Margen van en la franja de «Lo que ganaste».
+const COLUMNAS_RESULTADO = new Set(["Utilidad", "Margen"]);
+
+function encabezado(nombre: string): EncabezadoTabla {
+  return {
+    clave: nombre,
+    className: COLUMNAS_RESULTADO.has(nombre) ? estilos.resultado : undefined,
+    contenido: (
+      <span className={estilos.encabezadoAyuda} title={AYUDA_COLUMNAS[nombre]}>
+        {nombre}
+      </span>
+    ),
+  };
+}
+
+const COLUMNAS_DETALLE: EncabezadoTabla[] = [{ clave: "nivel", contenido: "Día · cuenta · producto" }, ...NOMBRES_COLUMNAS.map(encabezado)];
+const COLUMNAS_TOTAL_CUENTA: EncabezadoTabla[] = [{ clave: "cuenta", contenido: "Cuenta" }, ...NOMBRES_COLUMNAS.map(encabezado), encabezado("% con costo")];
+
+// La tabla se lee como la fórmula: lo que vendiste, lo que se descuenta
+// y lo que ganaste (mismo orden que NOMBRES_COLUMNAS).
+function gruposColumnas(columnasDatos: number): GrupoEncabezado[] {
+  return [
+    { clave: "nivel", etiqueta: "", columnas: 1, className: estilos.grupoVacio },
+    { clave: "vendiste", etiqueta: "Lo que vendiste", columnas: 2, className: estilos.grupo },
+    { clave: "descuenta", etiqueta: "Lo que se descuenta", columnas: 5, className: estilos.grupo },
+    { clave: "ganaste", etiqueta: "Lo que ganaste", columnas: 2, className: `${estilos.grupo} ${estilos.grupoResultado}` },
+    { clave: "datos", etiqueta: "Datos", columnas: columnasDatos, className: estilos.grupo },
+  ];
+}
+const GRUPOS_DETALLE = gruposColumnas(2);
+const GRUPOS_TOTAL_CUENTA = gruposColumnas(3);
 
 type Props = {
   empresaId: string;
@@ -208,8 +208,8 @@ export async function DetalleDiaCuentaProducto({
             <div className={estilos.gridKpi}>
               <TarjetaKpi titulo="Recaudo ventas" valor={mostrarMonto(total.recaudo)} detalle={[`${total.ventas} ventas · ${total.cantidad} unidades`]} />
               <TarjetaKpi titulo="Utilidad" valor={mostrarMonto(total.utilidad)} detalle={["Solo ventas con costo, antes de publicidad"]} />
-              <TarjetaKpi titulo="% util" valor={mostrarPorcentaje(total.porcentaje_utilidad)} />
-              <TarjetaKpi titulo="% ML" valor={mostrarPorcentaje(total.porcentaje_ml)} detalle={["Comisión ÷ recaudo, sin flete"]} />
+              <TarjetaKpi titulo="Margen" valor={mostrarPorcentaje(total.porcentaje_utilidad)} detalle={["Utilidad ÷ recaudo de las ventas con costo"]} />
+              <TarjetaKpi titulo="% comisión ML" valor={mostrarPorcentaje(total.porcentaje_ml)} detalle={["Comisión ÷ recaudo, sin flete"]} />
               <TarjetaKpi titulo="% de ventas con costo" valor={mostrarPorcentaje(porcentajeVentasConCosto(total))} />
               <TarjetaKpi
                 titulo="Ventas sin costo"
@@ -250,7 +250,7 @@ export async function DetalleDiaCuentaProducto({
               {mostrarResumen && (
                 <section className={estilos.seccion}>
                   <h2 className={estilos.tituloSeccion}>Total por cuenta, antes de publicidad</h2>
-                  <Tabla encabezados={["Cuenta", ...COLUMNAS.slice(1), "% con costo"]}>
+                  <Tabla encabezados={COLUMNAS_TOTAL_CUENTA} grupos={GRUPOS_TOTAL_CUENTA}>
                     {datos.resumenCuentas.map((c) => (
                       <FilaTabla key={c.cuenta_ml_id}>
                         <CeldaTabla>
@@ -266,6 +266,13 @@ export async function DetalleDiaCuentaProducto({
 
               <section className={estilos.seccion}>
                 <h2 className={estilos.tituloSeccion}>Detalle día a día · cuenta · producto</h2>
+                <p className={estilos.formula}>
+                  <span>
+                    <strong>Utilidad</strong> = Recaudo
+                  </span>
+                  <span>− Comisión ML − Flete ML − Costo − Packing − Envío</span>
+                  <span className={estilos.formulaNota}>Antes de publicidad · pasa el mouse por cada columna para ver qué es</span>
+                </p>
                 {ventasSinComision > 0 && (
                   <p className={estilos.suave}>
                     Comisión sin dato de Mercado Libre en {ventasSinComision} {ventasSinComision === 1 ? "venta" : "ventas"}: cuenta como $0
@@ -277,7 +284,8 @@ export async function DetalleDiaCuentaProducto({
                       vuelve a abrir solo el día más nuevo de la página. */}
                   <TablaDetalleAcordeon
                     key={`${pagina}|${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}`}
-                    encabezados={COLUMNAS_CORTAS}
+                    encabezados={COLUMNAS_DETALLE}
+                    grupos={GRUPOS_DETALLE}
                     dias={diasPagina}
                     pedidoIdExterno={pedidoIdExternoPagina}
                     conDevolucion={[...conDevolucion].filter((id) => idsPagina.has(id))}

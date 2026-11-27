@@ -72,11 +72,11 @@ describe("TablaDetalleAcordeon (issue #131)", () => {
       dia("2026-10-28", [["STOREKING", "p3"]]),
     ]);
     // Los dos días se ven siempre.
-    expect(html).toContain("2026-10-29 · 2 cta · 2 vtas");
-    expect(html).toContain("2026-10-28 · 1 cta · 1 vta");
+    expect(html).toContain("Jue 29 oct 2026 · 2 cuentas · 2 ventas");
+    expect(html).toContain("Mié 28 oct 2026 · 1 cuenta · 1 venta");
     // Del día abierto: sus dos cuentas y sus productos, con link y número de ML.
-    expect(html).toContain("STOREKING · 1 Vta");
-    expect(html).toContain("FMC · 1 Vta");
+    expect(html).toContain("STOREKING · 1 venta");
+    expect(html).toContain("FMC · 1 venta");
     expect(html).toContain('href="/panel/finanzas/ventas/p1"');
     expect(html).toContain("#MLp2");
     // Del día cerrado: nada.
