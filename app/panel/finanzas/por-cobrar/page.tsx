@@ -1,9 +1,13 @@
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
+import { normalizarParametro } from "@/lib/filtros-listado";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { leerPartidasPorCobrar } from "@/lib/finanzas/por-cobrar-consulta";
+import { tienePermiso } from "@/lib/roles";
+import { leerCuentasMpPorCobrar, leerPartidasPorCobrar, type CuentaMpPorCobrar } from "@/lib/finanzas/por-cobrar-consulta";
 import {
   agruparPorCuenta,
+  estadoVisiblePartida,
   estaVencida,
+  ETIQUETA_FUENTE,
   ETIQUETA_MARKETPLACE,
   filtrarPartidas,
   leerFiltrosPorCobrar,
@@ -13,9 +17,10 @@ import {
   ventanasBogota,
   type TotalesMoneda,
 } from "@/lib/finanzas/por-cobrar";
-import { mostrarMontoIso } from "@/components/finanzas/formato";
+import { fechaHoraBogota, mostrarMontoIso } from "@/components/finanzas/formato";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
+import { Chip } from "@/components/marco/Chip";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -23,13 +28,42 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import styles from "../finanzas.module.css";
+import { sincronizarPorCobrarMpAction } from "./actions";
 
 // Issue #422 — cuentas por cobrar: cuánto le deben Mercado Libre y
 // Falabella a la empresa. Solo lectura: finanzas.consultar (acá y en
 // lib/finanzas/por-cobrar-consulta.ts). Cada monto con la moneda de su
-// cuenta; los totales nunca mezclan monedas.
+// cuenta; los totales nunca mezclan monedas. Mercado Pago: «Actualizar
+// desde Mercado Pago» (finanzas.modificar) guarda los pagos sin liberar en
+// pagos_mp_por_cobrar; al abrir la página no se llama a Mercado Pago.
 
 const RUTA = "/panel/finanzas/por-cobrar";
+
+// Chip corto para ultimo_error_por_cobrar ("mp_http:400" → "mp_http").
+const ERROR_CORTO_POR_COBRAR_MP: Record<string, string> = {
+  mp_401: "Conexión rechazada",
+  mp_403: "Sin permiso en Mercado Pago",
+  mp_429: "Mercado Pago limitó las consultas",
+  mp_http: "Error de Mercado Pago",
+  mp_red: "Sin respuesta de Mercado Pago",
+  mp_renovando: "Renovando conexión",
+  mp_reconectar: "Hay que reconectar",
+  mp_error: "Error al actualizar",
+};
+
+const prefijoError = (valor: string) => valor.split(":", 1)[0];
+
+function EstadoCuentaMp({ cuenta }: { cuenta: CuentaMpPorCobrar }) {
+  if (cuenta.ultimoErrorPorCobrar) {
+    return (
+      <Chip estado="advertencia" title={`Último intento: ${cuenta.ultimoErrorPorCobrar}`}>
+        {ERROR_CORTO_POR_COBRAR_MP[prefijoError(cuenta.ultimoErrorPorCobrar)] ?? "Error al actualizar"} ({cuenta.ultimoErrorPorCobrar})
+      </Chip>
+    );
+  }
+  if (!cuenta.porCobrarSincronizadoTs) return <Chip>Sin sincronizar</Chip>;
+  return <Chip estado="exito">Sincronizada</Chip>;
+}
 
 // "COP 1.000 · MXN 50" — una cifra por moneda.
 function porMoneda(totales: TotalesMoneda[], campo: "total" | "estaSemana" | "proximoMes"): string {
@@ -41,9 +75,12 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
   const { usuario, activa: empresa, rolNombre } = await obtenerContextoPanel();
   const ahora = new Date();
   let todas;
+  let cuentasMp: CuentaMpPorCobrar[];
+  let puedeModificar = false;
   try {
-    await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
-    todas = await leerPartidasPorCobrar(empresa.id, usuario.id);
+    const miMembresia = await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
+    puedeModificar = tienePermiso(miMembresia.permisos, "finanzas", "modificar");
+    [todas, cuentasMp] = await Promise.all([leerPartidasPorCobrar(empresa.id, usuario.id), leerCuentasMpPorCobrar(empresa.id, usuario.id)]);
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a Finanzas.`} />;
@@ -63,6 +100,9 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
   const sinFecha = totales.filter((t) => t.sinFecha !== "0.00");
   const vencido = totales.filter((t) => t.vencido !== "0.00");
   const sinNeto = totales.reduce((n, t) => n + t.sinNeto, 0);
+  const retenido = totales.filter((t) => t.retenido !== "0.00");
+  const error = normalizarParametro(searchParams.error);
+  const ok = normalizarParametro(searchParams.ok);
   const montoDe = (monto: string | null, moneda: string) => (monto === null ? "Sin neto" : mostrarMontoIso(monto, moneda));
 
   return (
@@ -72,12 +112,18 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
         descripcion="Lo que Mercado Libre y Falabella todavía no te han pagado: ventas con la plata sin liberar y cortes de Falabella sin pagar."
       />
 
+      {error && <p className={styles.avisoError}>{error}</p>}
+      {ok && <p className={styles.avisoExito}>{ok}</p>}
+
       <section className={styles.gridKpi}>
         <TarjetaKpi
           titulo="Total por cobrar"
           valor={porMoneda(totales, "total")}
           detalle={[
             `${partidas.length} ${partidas.length === 1 ? "partida" : "partidas"}.`,
+            ...(retenido.length
+              ? [`Retenido (pagos en reclamo, sin fecha de liberación): ${retenido.map((t) => mostrarMontoIso(t.retenido, t.moneda)).join(" · ")}.`]
+              : []),
             ...(vencido.length
               ? [`Vencido (la fecha de liberación ya pasó y no se ha liberado): ${vencido.map((t) => mostrarMontoIso(t.vencido, t.moneda)).join(" · ")}.`]
               : []),
@@ -98,6 +144,46 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
           detalle={[`Fecha esperada del ${ventanas.proximoMes.desde} al ${ventanas.proximoMes.hasta}.`]}
         />
       </section>
+
+      {cuentasMp.length > 0 && (
+        <Tarjeta>
+          <h2 className={styles.tituloSeccion}>Mercado Pago</h2>
+          <p className={styles.suave}>
+            Con una cuenta sincronizada, lo por cobrar de su tienda de Mercado Libre sale de los pagos sin liberar de Mercado Pago y no del estimado
+            de ventas.
+          </p>
+          <Tabla encabezados={["Cuenta", "Última actualización", "Estado", ...(puedeModificar ? [""] : [])]}>
+            {cuentasMp.map((c) => (
+              <FilaTabla key={c.id}>
+                <CeldaTabla>
+                  <strong>{c.nickname || c.cuentaIdExterna}</strong>
+                </CeldaTabla>
+                <CeldaTabla>{c.porCobrarSincronizadoTs ? fechaHoraBogota(c.porCobrarSincronizadoTs) : "—"}</CeldaTabla>
+                <CeldaTabla>
+                  <EstadoCuentaMp cuenta={c} />
+                  {c.ultimoErrorPorCobrar && ["mp_reconectar", "mp_401"].includes(prefijoError(c.ultimoErrorPorCobrar)) && (
+                    <>
+                      {" "}
+                      <BotonLink href="/panel/conectar-ml" variante="fantasma">
+                        Reconectar
+                      </BotonLink>
+                    </>
+                  )}
+                </CeldaTabla>
+                {puedeModificar && (
+                  <CeldaTabla>
+                    <form action={sincronizarPorCobrarMpAction.bind(null, c.id)}>
+                      <Boton type="submit" variante="fantasma">
+                        Actualizar desde Mercado Pago
+                      </Boton>
+                    </form>
+                  </CeldaTabla>
+                )}
+              </FilaTabla>
+            ))}
+          </Tabla>
+        </Tarjeta>
+      )}
 
       <form method="get" className={styles.filtros}>
         <Campo etiqueta="Marketplace">
@@ -182,6 +268,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
               "Cuenta",
               "Orden / corte",
               "Estado",
+              "Fuente",
               { clave: "monto", contenido: "Monto neto", numerica: true },
             ]}
           >
@@ -194,7 +281,10 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
                 <CeldaTabla>{ETIQUETA_MARKETPLACE[p.marketplace]}</CeldaTabla>
                 <CeldaTabla>{p.cuenta}</CeldaTabla>
                 <CeldaTabla>{p.referencia}</CeldaTabla>
-                <CeldaTabla>{p.estado ?? "—"}</CeldaTabla>
+                <CeldaTabla>
+                  <span title={p.estado ?? undefined}>{estadoVisiblePartida(p, ventanas) ?? "—"}</span>
+                </CeldaTabla>
+                <CeldaTabla>{ETIQUETA_FUENTE[p.fuente]}</CeldaTabla>
                 <CeldaTabla numerica>{montoDe(p.monto, p.moneda)}</CeldaTabla>
               </FilaTabla>
             ))}

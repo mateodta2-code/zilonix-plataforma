@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   agruparPorCuenta,
   aDiezmilesimas,
+  emparejarCuentasMp,
+  estadoVisiblePartida,
   aTextoMonto,
   esEstadoFalabellaPorCobrar,
   estaVencida,
@@ -23,6 +25,8 @@ const CUENTA_FAL = "33333333-3333-4333-8333-333333333333";
 function partida(extra: Partial<PartidaPorCobrar>): PartidaPorCobrar {
   return {
     marketplace: "ml",
+    fuente: "ventas",
+    retenido: false,
     cuentaId: CUENTA_ML,
     cuenta: "TIENDA_CO",
     moneda: "COP",
@@ -74,8 +78,8 @@ describe("resumirPorMoneda", () => {
 
   it("separa por moneda y reparte semana, próximo mes y sin fecha", () => {
     expect(resumirPorMoneda(partidas, ventanasBogota(AHORA))).toEqual([
-      { moneda: "COP", partidas: 4, total: "268831.44", estaSemana: "100000.00", proximoMes: "50000.50", sinFecha: "117830.94", vencido: "0.00", sinNeto: 0 },
-      { moneda: "MXN", partidas: 1, total: "300.00", estaSemana: "300.00", proximoMes: "0.00", sinFecha: "0.00", vencido: "0.00", sinNeto: 0 },
+      { moneda: "COP", partidas: 4, total: "268831.44", porLiberar: "268831.44", retenido: "0.00", estaSemana: "100000.00", proximoMes: "50000.50", sinFecha: "117830.94", vencido: "0.00", sinNeto: 0 },
+      { moneda: "MXN", partidas: 1, total: "300.00", porLiberar: "300.00", retenido: "0.00", estaSemana: "300.00", proximoMes: "0.00", sinFecha: "0.00", vencido: "0.00", sinNeto: 0 },
     ]);
   });
 
@@ -153,5 +157,70 @@ describe("estados de Falabella", () => {
     expect(
       extraerFechaProgramadaFalabella(["Programado para 2026-12-10", "Abierto", "Programado para 2026-11-26", "Programado para 2026-02-30"])
     ).toBe("2026-11-26");
+  });
+});
+
+describe("Mercado Pago: retenido y estado visible", () => {
+  const v = ventanasBogota(AHORA);
+
+  it("lo retenido suma al total y a «retenido», nunca a semana, mes, vencido ni sin fecha", () => {
+    const lista = [
+      partida({ fuente: "mp", fechaEsperada: "2026-11-21", monto: "100000.00" }),
+      partida({ fuente: "mp", referencia: "P-2", retenido: true, fechaEsperada: "2026-11-10", monto: "25000.25" }),
+      partida({ fuente: "mp", referencia: "P-3", retenido: true, fechaEsperada: null, monto: "0.10" }),
+    ];
+    const [cop] = resumirPorMoneda(lista, v);
+    expect(cop).toMatchObject({
+      partidas: 3,
+      total: "125000.35",
+      porLiberar: "100000.00",
+      retenido: "25000.35",
+      estaSemana: "100000.00",
+      vencido: "0.00",
+      sinFecha: "0.00",
+    });
+    expect(agruparPorCuenta(lista, v)[0]).toMatchObject({ total: "125000.35", retenido: "25000.35" });
+  });
+
+  it("muestra «Por liberar», «Vencido» o «Retenido (reclamo)» en ML; Falabella conserva su estado", () => {
+    expect(estadoVisiblePartida(partida({ fuente: "mp", estado: "approved" }), v)).toBe("Por liberar");
+    expect(estadoVisiblePartida(partida({ fuente: "mp", fechaEsperada: "2026-11-01" }), v)).toBe("Vencido");
+    expect(estadoVisiblePartida(partida({ fuente: "mp", retenido: true, fechaEsperada: "2026-11-01" }), v)).toBe("Retenido (reclamo)");
+    expect(estadoVisiblePartida(partida({ marketplace: "falabella", fuente: "falabella", estado: "Abierto" }), v)).toBe("Abierto");
+  });
+});
+
+describe("emparejarCuentasMp (sin doble conteo)", () => {
+  const CUENTA_MP = "44444444-4444-4444-8444-444444444444";
+  const CUENTA_MP_SOLA = "55555555-5555-4555-8555-555555555555";
+  const cuentasMl = [
+    { id: CUENTA_ML, cuentaIdExterna: "111", nickname: "TIENDA_CO" },
+    { id: CUENTA_MX, cuentaIdExterna: "222", nickname: "TIENDA_MX" },
+  ];
+
+  it("la cuenta ML con MP sincronizado usa los pagos de MP y omite pedidos_finanzas; las demás siguen con el estimado", () => {
+    const { reemplazadas, destinoMp } = emparejarCuentasMp(cuentasMl, [
+      { id: CUENTA_MP, cuentaIdExterna: "111", nickname: "MP_CO" },
+      { id: CUENTA_MP_SOLA, cuentaIdExterna: "999", nickname: null },
+    ]);
+    expect([...reemplazadas]).toEqual([CUENTA_ML]);
+    expect(destinoMp.get(CUENTA_MP)).toEqual({ cuentaId: CUENTA_ML, cuenta: "TIENDA_CO" });
+    expect(destinoMp.get(CUENTA_MP_SOLA)).toEqual({ cuentaId: CUENTA_MP_SOLA, cuenta: "999" });
+
+    const estimado = [
+      partida({ referencia: "2000001", monto: "100000.00" }),
+      partida({ cuentaId: CUENTA_MX, cuenta: "TIENDA_MX", moneda: "MXN", referencia: "3000001", monto: "300.00" }),
+    ].filter((p) => !reemplazadas.has(p.cuentaId));
+    const deMp = [
+      partida({ fuente: "mp", cuentaId: destinoMp.get(CUENTA_MP)!.cuentaId, referencia: "2000001 (pago 9)", monto: "95000.00" }),
+    ];
+    const totales = resumirPorMoneda([...estimado, ...deMp], ventanasBogota(AHORA));
+    // La misma venta no se cuenta dos veces: solo el neto de Mercado Pago.
+    expect(totales.find((t) => t.moneda === "COP")).toMatchObject({ partidas: 1, total: "95000.00" });
+    expect(totales.find((t) => t.moneda === "MXN")).toMatchObject({ partidas: 1, total: "300.00" });
+  });
+
+  it("sin cuentas MP sincronizadas no reemplaza nada", () => {
+    expect(emparejarCuentasMp(cuentasMl, []).reemplazadas.size).toBe(0);
   });
 });
