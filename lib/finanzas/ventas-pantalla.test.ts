@@ -176,13 +176,14 @@ describe("resolverRangoVentas (issue #131 Parte A)", () => {
   });
 });
 
-describe("resolverRangoVentas con tope de Finanzas (3 meses)", () => {
+describe("resolverRangoVentas con tope de Finanzas (1 año)", () => {
   const ahora = new Date("2026-11-27T15:00:00.000Z");
-  it("acepta hasta 92 días con el tope de Finanzas y rechaza 93", () => {
-    expect(RANGO_MAXIMO_DIAS_FINANZAS).toBe(92);
-    // oct–dic = 31 + 30 + 31 = 92 días.
-    expect(resolverRangoVentas("2026-10-01", "2026-12-31", ahora, RANGO_MAXIMO_DIAS_FINANZAS).rango?.hasta).toBe("2026-12-31");
-    expect(resolverRangoVentas("2026-09-30", "2026-12-31", ahora, RANGO_MAXIMO_DIAS_FINANZAS).error).toMatch(/máximo 92 días \(pediste 93\)/);
+  it("acepta hasta 366 días con el tope de Finanzas y rechaza 367", () => {
+    expect(RANGO_MAXIMO_DIAS_FINANZAS).toBe(366);
+    // Un año bisiesto completo (2028) = 366 días.
+    expect(resolverRangoVentas("2028-01-01", "2028-12-31", ahora, RANGO_MAXIMO_DIAS_FINANZAS).rango?.hasta).toBe("2028-12-31");
+    expect(resolverRangoVentas("2025-11-27", "2026-11-27", ahora, RANGO_MAXIMO_DIAS_FINANZAS).rango?.desde).toBe("2025-11-27");
+    expect(resolverRangoVentas("2027-12-31", "2028-12-31", ahora, RANGO_MAXIMO_DIAS_FINANZAS).error).toMatch(/máximo 366 días \(pediste 367\)/);
   });
   it("sin tope explícito sigue en 31 días (Pedidos no cambia)", () => {
     expect(resolverRangoVentas("2026-10-01", "2026-11-01", ahora).error).toMatch(/máximo 31 días/);

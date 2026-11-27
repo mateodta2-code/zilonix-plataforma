@@ -1,0 +1,2 @@
+- Finanzas → Ventas y utilidad: el filtro de fechas acepta hasta 1 año (366 días) en vez de 3 meses. Pedidos e indicadores siguen con 31 días.
+- Tarjetas de cifras (`TarjetaKpi`, en todo el panel): la cifra se achica sola según el ancho de la tarjeta en vez de cortarse («$ 27.466.7…»). En Ventas y utilidad, «Ventas sin costo» muestra solo el número de ventas y el monto pasa a la línea de abajo.

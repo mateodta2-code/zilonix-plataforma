@@ -92,7 +92,7 @@ type Props = {
   // español neutro (onboarding de 5 minutos); sin esto, el texto por
   // defecto de abajo ("foto financiera") sigue para Finanzas → Ventas.
   mensajeVacio?: React.ReactNode;
-  // Tope del rango de fechas. Finanzas → Ventas pasa 3 meses; Pedidos
+  // Tope del rango de fechas. Finanzas → Ventas pasa 1 año; Pedidos
   // se queda con el de siempre (31 días).
   rangoMaximoDias?: number;
 };
@@ -213,8 +213,8 @@ export async function DetalleDiaCuentaProducto({
               <TarjetaKpi titulo="% de ventas con costo" valor={mostrarPorcentaje(porcentajeVentasConCosto(total))} />
               <TarjetaKpi
                 titulo="Ventas sin costo"
-                valor={`${total.ventas_sin_costo} ventas sin costo · ${mostrarMonto(total.recaudo_sin_costo)}`}
-                detalle={total.ventas_sin_costo > 0 ? ["Fuera de la utilidad hasta tener costo"] : undefined}
+                valor={`${total.ventas_sin_costo} ${total.ventas_sin_costo === 1 ? "venta" : "ventas"}`}
+                detalle={[`${mostrarMonto(total.recaudo_sin_costo)} en recaudo`, ...(total.ventas_sin_costo > 0 ? ["Fuera de la utilidad hasta tener costo"] : [])]}
               />
             </div>
           )}
