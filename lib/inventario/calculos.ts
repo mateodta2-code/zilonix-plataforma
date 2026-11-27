@@ -188,3 +188,22 @@ export function agruparSaldosPorTipo(saldos: { tipo: TipoBodega; disponible: num
   for (const s of saldos) porTipo[s.tipo] += s.disponible;
   return porTipo;
 }
+
+// Días de stock en /panel/inventario: para cuántos días alcanza lo que
+// se publica (Para ML) al ritmo de lo vendido en ML en los últimos 30
+// días. Se cuenta con enteros (para_ml × 30 ÷ vendidas) y no con el
+// promedio diario, para que un 0,1 por día no deje 99,999… y redondee
+// a 99. Sin ventas en la ventana: null (la pantalla dice «sin ventas»,
+// nunca «infinito»).
+export const DIAS_STOCK_MAXIMO = 365;
+
+export function calcularDiasStock(paraMl: number, vendidas30: number): number | null {
+  if (vendidas30 <= 0) return null;
+  return Math.floor((Math.max(0, paraMl) * 30) / vendidas30);
+}
+
+// Mismo texto en la pantalla y en el CSV.
+export function textoDiasStock(dias: number | null): string {
+  if (dias === null) return "sin ventas";
+  return dias > DIAS_STOCK_MAXIMO ? `+${DIAS_STOCK_MAXIMO}` : String(dias);
+}

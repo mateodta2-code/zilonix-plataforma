@@ -5,7 +5,7 @@ import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { normalizarParametro } from "@/lib/filtros-listado";
 import { listarBodegas } from "@/lib/inventario/bodegas";
-import { cantidadAPublicar } from "@/lib/inventario/calculos";
+import { calcularDiasStock, cantidadAPublicar } from "@/lib/inventario/calculos";
 import { leerConfiguracionInventario } from "@/lib/inventario/configuracion";
 import { listarInventarioParaExportar, TOPE_EXPORTAR_INVENTARIO } from "@/lib/inventario/stock";
 import { armarCsv, fechaArchivoBogota, type ValorCsv } from "@/lib/csv-exportar";
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
   const conSaldo = new Set(filas.flatMap((f) => f.porBodega.filter((b) => b.disponible || b.reservado).map((b) => b.bodegaId)));
   const columnas = lista.filter((b) => b.activa || conSaldo.has(b.id));
 
-  const encabezados = ["sku", "nombre", "tipo", ...columnas.map((b) => b.nombre), "reservado", "para_ml"];
+  const encabezados = ["sku", "nombre", "tipo", ...columnas.map((b) => b.nombre), "reservado", "para_ml", "dias_stock"];
   const cuerpo: ValorCsv[][] = filas.map((f) => [
     f.codigo,
     f.nombre,
@@ -52,8 +52,9 @@ export async function GET(request: NextRequest) {
     ...columnas.map((b) => (f.esKit ? null : (f.porBodega.find((x) => x.bodegaId === b.id)?.disponible ?? 0))),
     f.esKit ? null : f.totalReservado,
     cantidadAPublicar(f.publicable, config.bufferMl),
+    diasStockCsv(f.esKit, cantidadAPublicar(f.publicable, config.bufferMl), f.vendidas30),
   ]);
-  if (recortado) cuerpo.push([`Archivo recortado a ${TOPE_EXPORTAR_INVENTARIO} filas: filtra por SKU o bodega para ver el resto`]);
+  if (recortado) cuerpo.push([`Archivo recortado a ${TOPE_EXPORTAR_INVENTARIO} filas: filtra por código o nombre para ver el resto`]);
 
   return new NextResponse(armarCsv(encabezados, cuerpo), {
     headers: {
@@ -62,4 +63,13 @@ export async function GET(request: NextRequest) {
       "cache-control": "no-store",
     },
   });
+}
+
+// Mismo número que la tabla; vacío si no hay ventas o es kit (en la
+// tabla, «sin ventas» y «—»). Más de 365 va el número real y no «+365»:
+// armarCsv le antepone ' a toda celda que empiece con + (para que no se
+// ejecute como fórmula), y un número se puede ordenar en Excel.
+function diasStockCsv(esKit: boolean, paraMl: number, vendidas30: number): ValorCsv {
+  if (esKit) return null;
+  return calcularDiasStock(paraMl, vendidas30);
 }
