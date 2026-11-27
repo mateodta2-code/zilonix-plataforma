@@ -1,0 +1,1 @@
+- Finanzas → Ventas y utilidad (Mercado Libre y Falabella): el filtro de fechas acepta hasta 3 meses (92 días) en vez de 31. Pedidos e indicadores siguen con 31 días.

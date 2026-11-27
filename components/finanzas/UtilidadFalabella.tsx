@@ -1,7 +1,7 @@
 import { acotarPagina, normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarCuentasFalabellaParaSelector, listarUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella-consulta";
 import type { EstadoUtilidadFalabella, OrdenUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella";
-import { resolverRangoVentas } from "@/lib/finanzas/ventas-pantalla";
+import { RANGO_MAXIMO_DIAS_FINANZAS, resolverRangoVentas } from "@/lib/finanzas/ventas-pantalla";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
@@ -78,7 +78,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
   const cuentaId = cuentas.find((c) => c.id === cuentaParam)?.id ?? null;
   const estadoParam = normalizarParametro(searchParams.estado);
   const estado = FILTROS_ESTADO.find((e) => e === estadoParam);
-  const rango = resolverRangoVentas(normalizarParametro(searchParams.desde), normalizarParametro(searchParams.hasta), new Date());
+  const rango = resolverRangoVentas(normalizarParametro(searchParams.desde), normalizarParametro(searchParams.hasta), new Date(), RANGO_MAXIMO_DIAS_FINANZAS);
 
   const desdeForm = rango.rango?.desde ?? normalizarParametro(searchParams.desde) ?? "";
   const hastaForm = rango.rango?.hasta ?? normalizarParametro(searchParams.hasta) ?? "";
