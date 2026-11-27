@@ -1,10 +1,11 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { empresas, membresias, permisosRol, roles, skus, usuarios } from "@/db/schema";
+import { bodegas, empresas, kardexMovimientos, membresias, permisosRol, roles, skus, stockBodega, usuarios } from "@/db/schema";
 import * as auditoriaModule from "@/lib/auditoria";
+import * as movimientosModule from "@/lib/inventario/movimientos";
 import { SinPermisoError } from "@/lib/permisos";
 import { confirmarImportacionSkus, previsualizarImportacionSkus, SinFilasValidasError } from "./sku-importar";
 
@@ -30,6 +31,33 @@ async function crearEmpresaConPermiso(nombre: string, modulo: string, accion: "c
   return { empresaId, usuarioId };
 }
 
+async function crearBodega(empresaId: string, nombre: string, opciones: { esPrincipal?: boolean; activa?: boolean } = {}): Promise<string> {
+  const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .insert(bodegas)
+      .values({ empresaId, nombre, esPrincipal: opciones.esPrincipal ?? false, activa: opciones.activa ?? true })
+      .returning({ id: bodegas.id })
+  );
+  return fila.id;
+}
+
+async function idDeSku(empresaId: string, codigo: string): Promise<string | undefined> {
+  const [fila] = await dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ id: skus.id }).from(skus).where(and(eq(skus.empresaId, empresaId), eq(skus.codigo, codigo)))
+  );
+  return fila?.id;
+}
+
+async function stockDe(empresaId: string, skuId: string) {
+  return dbComoEmpresa(empresaId, (tx) =>
+    tx.select({ bodegaId: stockBodega.bodegaId, disponible: stockBodega.disponible }).from(stockBodega).where(eq(stockBodega.skuId, skuId))
+  );
+}
+
+async function kardexDe(empresaId: string, skuId: string) {
+  return dbComoEmpresa(empresaId, (tx) => tx.select().from(kardexMovimientos).where(eq(kardexMovimientos.skuId, skuId)));
+}
+
 function csvDe(filas: string[]): string {
   return ["sku,nombre,bodega,cantidad_inicial", ...filas].join("\n");
 }
@@ -42,6 +70,8 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
   let empresaBId: string;
   let usuarioBId: string;
   let usuarioSinPermisoId: string;
+  let principalAId: string;
+  let norteAId: string;
 
   beforeAll(async () => {
     const a = await crearEmpresaConPermiso("Empresa A importar CSV", "inventario", "modificar");
@@ -51,6 +81,13 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
     const b = await crearEmpresaConPermiso("Empresa B importar CSV", "inventario", "modificar");
     empresaBId = b.empresaId;
     usuarioBId = b.usuarioId;
+
+    // Desde que el CSV carga stock (cantidad > 0 sin bodega va a la
+    // principal), cada empresa de prueba necesita su bodega principal.
+    principalAId = await crearBodega(empresaAId, "Bodega Principal", { esPrincipal: true });
+    norteAId = await crearBodega(empresaAId, "Bodega Norte");
+    await crearBodega(empresaAId, "Bodega Cerrada", { activa: false });
+    await crearBodega(empresaBId, "Principal B", { esPrincipal: true });
 
     usuarioSinPermisoId = randomUUID();
     await db.insert(usuarios).values({ id: usuarioSinPermisoId, email: `prueba-sinpermiso-${usuarioSinPermisoId.slice(0, 8)}@zilonix.test`, nombre: "Usuario sin permiso" });
@@ -156,7 +193,9 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
     expect(fila.nombre).toBe("Nombre que se queda");
   });
 
-  it("un archivo de 1200 filas (más de 2 lotes de 500) entra completo", async () => {
+  // Ahora cada SKU nuevo con cantidad > 0 deja su movimiento de kardex
+  // (~1176 de las 1200 filas): más tiempo que el resto de pruebas.
+  it("un archivo de 1200 filas (más de 2 lotes de 500) entra completo", { timeout: 120_000 }, async () => {
     const TOTAL = 1200;
     const filas = Array.from({ length: TOTAL }, (_, i) => `LOTE-${String(i).padStart(4, "0")},Producto ${i},,${i % 50}`);
     const csv = csvDe(filas);
@@ -251,5 +290,123 @@ describe("importación de SKUs desde CSV (issue #58, Z-ML-09)", () => {
 
     const [filaDeA] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.codigo, "SOLO-EN-A")));
     expect(filaDeA.nombre).toBe("x"); // sigue igual, B nunca la tocó
+  });
+
+  describe("stock inicial en el kardex", () => {
+    it("SKU nuevo con 10 y bodega vacía: 10 en la principal y una fila de kardex entrada/manual", async () => {
+      const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csvDe(["STK-PRINCIPAL,Producto,,10"]));
+      expect(resultado.stockCargado).toBe(1);
+      expect(resultado.unidadesCargadas).toBe(10);
+
+      const skuId = (await idDeSku(empresaAId, "STK-PRINCIPAL"))!;
+      expect(await stockDe(empresaAId, skuId)).toEqual([{ bodegaId: principalAId, disponible: 10 }]);
+      const kardex = await kardexDe(empresaAId, skuId);
+      expect(kardex).toHaveLength(1);
+      expect(kardex[0]).toMatchObject({
+        tipo: "entrada",
+        origen: "manual",
+        deltaDisponible: 10,
+        actorTipo: "persona",
+        usuarioId: usuarioAId,
+        nota: "Stock inicial (importación CSV)",
+        claveIdempotencia: `importacion-csv:stock-inicial:${skuId}`,
+      });
+    });
+
+    it("bodega por nombre con otra capitalización y espacios: entra en esa bodega", async () => {
+      const csv = csvDe(["STK-NORTE,Producto,  bodega   NORTE ,4"]);
+      const vista = await previsualizarImportacionSkus(empresaAId, usuarioAId, csv);
+      expect(vista.filas[0]).toMatchObject({ bodegaResuelta: "Bodega Norte", cargaStock: true, yaExiste: false });
+
+      await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+      const skuId = (await idDeSku(empresaAId, "STK-NORTE"))!;
+      expect(await stockDe(empresaAId, skuId)).toEqual([{ bodegaId: norteAId, disponible: 4 }]);
+    });
+
+    it("subir el MISMO archivo dos veces: el stock sigue en 10 y hay una sola fila de kardex", async () => {
+      const csv = csvDe(["STK-DOBLE,Producto,,10"]);
+      await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+
+      const vista = await previsualizarImportacionSkus(empresaAId, usuarioAId, csv);
+      expect(vista.filas[0]).toMatchObject({ yaExiste: true, cargaStock: false });
+      const segunda = await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+      expect(segunda.stockCargado).toBe(0);
+      expect(segunda.unidadesCargadas).toBe(0);
+
+      const skuId = (await idDeSku(empresaAId, "STK-DOBLE"))!;
+      expect(await stockDe(empresaAId, skuId)).toEqual([{ bodegaId: principalAId, disponible: 10 }]);
+      expect(await kardexDe(empresaAId, skuId)).toHaveLength(1);
+    });
+
+    it("SKU que ya existía: se actualiza el nombre y el stock no cambia", async () => {
+      await dbComoEmpresa(empresaAId, (tx) => tx.insert(skus).values({ empresaId: empresaAId, codigo: "STK-EXISTE", nombre: "Viejo" }));
+      const skuId = (await idDeSku(empresaAId, "STK-EXISTE"))!;
+
+      const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csvDe(["STK-EXISTE,Nuevo,,8"]));
+      expect(resultado.actualizados).toBe(1);
+      expect(resultado.stockCargado).toBe(0);
+
+      const [fila] = await dbComoEmpresa(empresaAId, (tx) => tx.select().from(skus).where(eq(skus.id, skuId)));
+      expect(fila.nombre).toBe("Nuevo");
+      expect(await stockDe(empresaAId, skuId)).toEqual([]);
+      expect(await kardexDe(empresaAId, skuId)).toHaveLength(0);
+    });
+
+    it("bodega que no existe o desactivada: error en la vista previa y al confirmar no se crea ni el SKU ni el stock", async () => {
+      const csv = csvDe(["STK-INVENTADA,x,Bodega Fantasma,5", "STK-CERRADA,x,bodega cerrada,5", "STK-VALIDA,x,,1"]);
+      const vista = await previsualizarImportacionSkus(empresaAId, usuarioAId, csv);
+      expect(vista.filas.map((f) => f.sku)).toEqual(["STK-VALIDA"]);
+      expect(vista.errores.filter((e) => e.columna === "bodega").map((e) => e.numeroFila)).toEqual([2, 3]);
+      expect(vista.resumen.validas).toBe(1);
+      expect(vista.resumen.conError).toBe(2);
+
+      const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csv);
+      expect(resultado.creados).toBe(1);
+      expect(resultado.omitidosPorError).toBe(2);
+      expect(await idDeSku(empresaAId, "STK-INVENTADA")).toBeUndefined();
+      expect(await idDeSku(empresaAId, "STK-CERRADA")).toBeUndefined();
+    });
+
+    it("cantidad 0: se crea el SKU sin movimiento de stock", async () => {
+      const resultado = await confirmarImportacionSkus(empresaAId, usuarioAId, csvDe(["STK-CERO,x,,0"]));
+      expect(resultado.creados).toBe(1);
+      expect(resultado.stockCargado).toBe(0);
+
+      const skuId = await idDeSku(empresaAId, "STK-CERO");
+      expect(skuId).toBeDefined();
+      expect(await kardexDe(empresaAId, skuId!)).toHaveLength(0);
+    });
+
+    it("todo o nada: si falla el movimiento de stock, tampoco queda el SKU", async () => {
+      const spy = vi.spyOn(movimientosModule, "aplicarMovimientosTx").mockRejectedValueOnce(new Error("Fallo simulado del kardex"));
+      try {
+        await expect(confirmarImportacionSkus(empresaAId, usuarioAId, csvDe(["STK-ATOM,x,,3"]))).rejects.toThrow("Fallo simulado del kardex");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await idDeSku(empresaAId, "STK-ATOM")).toBeUndefined();
+    });
+
+    it("sin bodega principal y cantidad > 0 sin bodega: error de fila que pide crear una bodega", async () => {
+      const c = await crearEmpresaConPermiso("Empresa C sin bodegas", "inventario", "modificar");
+      const vista = await previsualizarImportacionSkus(c.empresaId, c.usuarioId, csvDe(["STK-SINBOD,x,,2", "STK-SINBOD-0,x,,0"]));
+      expect(vista.errores).toEqual([{ numeroFila: 2, columna: "bodega", mensaje: "Crea una bodega en /panel/bodegas primero" }]);
+      expect(vista.filas.map((f) => f.sku)).toEqual(["STK-SINBOD-0"]);
+    });
+
+    it("RLS: la empresa B escribe en su CSV el nombre de una bodega de A y no carga nada en A", async () => {
+      const csv = csvDe(["STK-RLS,x,Bodega Norte,7"]);
+      const vista = await previsualizarImportacionSkus(empresaBId, usuarioBId, csv);
+      expect(vista.filas).toHaveLength(0);
+      expect(vista.errores[0]).toMatchObject({ columna: "bodega" });
+
+      await expect(confirmarImportacionSkus(empresaBId, usuarioBId, csv)).rejects.toThrow(SinFilasValidasError);
+      expect(await idDeSku(empresaBId, "STK-RLS")).toBeUndefined();
+      const enNorte = await dbComoEmpresa(empresaAId, (tx) =>
+        tx.select().from(kardexMovimientos).where(and(eq(kardexMovimientos.empresaId, empresaAId), eq(kardexMovimientos.bodegaId, norteAId)))
+      );
+      // En la bodega de A solo hay movimientos de gente de A, nunca de B.
+      expect(enNorte.every((m) => m.usuarioId === usuarioAId)).toBe(true);
+    });
   });
 });

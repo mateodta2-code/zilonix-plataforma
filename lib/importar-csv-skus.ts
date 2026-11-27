@@ -58,6 +58,12 @@ export type ResultadoImportarCsvSkus = {
   filas: FilaSkuValida[];
   errores: ErrorFilaCsv[];
   resumen: ResumenImportacionCsv;
+  // Número de fila de cada SKU válido (los repetidos ya salieron como
+  // error, así que el SKU es único). Va aparte y no dentro de la fila
+  // para no cambiar la forma de FilaSkuValida: lo usa
+  // lib/ml/sku-importar.ts para marcar con su número real una fila
+  // cuya bodega no existe en la empresa.
+  numeroFilaPorSku: Map<string, number>;
 };
 
 // 5 MB de UTF-8. Por encima de eso el archivo se rechaza entero, antes
@@ -258,6 +264,7 @@ function rechazoDeArchivo(numeroFila: number, mensaje: string): ResultadoImporta
     filas: [],
     errores: [{ numeroFila, columna: "archivo", mensaje }],
     resumen: resumenSinFilas(),
+    numeroFilaPorSku: new Map(),
   };
 }
 
@@ -270,6 +277,7 @@ function erroresDeEncabezado(numeroFila: number, faltantes: readonly string[]): 
       mensaje: `Falta la columna obligatoria "${h}" en el encabezado — revisa que el archivo use la plantilla de Zilonix (sku, nombre, bodega, cantidad_inicial).`,
     })),
     resumen: resumenSinFilas(),
+    numeroFilaPorSku: new Map(),
   };
 }
 
@@ -406,9 +414,9 @@ export function importarCsvSkus(textoCsv: string): ResultadoImportarCsvSkus {
   skusRepetidos.sort();
 
   const filasConSkuRepetido = new Set(skusRepetidos);
-  const filas = candidatas
-    .filter((c) => !filasConSkuRepetido.has(c.sku))
-    .map(({ numeroFila: _numeroFila, ...fila }) => fila);
+  const validas = candidatas.filter((c) => !filasConSkuRepetido.has(c.sku));
+  const filas = validas.map(({ numeroFila: _numeroFila, ...fila }) => fila);
+  const numeroFilaPorSku = new Map(validas.map((c) => [c.sku, c.numeroFila]));
 
   const filasConError = new Set(errores.map((e) => e.numeroFila));
 
@@ -421,6 +429,7 @@ export function importarCsvSkus(textoCsv: string): ResultadoImportarCsvSkus {
       skusRepetidos,
       columnasIgnoradas,
     },
+    numeroFilaPorSku,
   };
 }
 

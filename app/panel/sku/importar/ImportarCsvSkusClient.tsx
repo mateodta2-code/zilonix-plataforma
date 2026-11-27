@@ -46,7 +46,7 @@ export function ImportarCsvSkusClient() {
   }
 
   if (estado.paso === "confirmado") {
-    const { creados, actualizados, sinCambios, omitidosPorError } = estado.resultado;
+    const { creados, actualizados, sinCambios, omitidosPorError, stockCargado, unidadesCargadas } = estado.resultado;
     return (
       <div className={styles.resultadoFinal}>
         <p className={styles.resumenFinal}>
@@ -54,6 +54,11 @@ export function ImportarCsvSkusClient() {
           {sinCambios > 0 && (
             <>
               , <strong>{sinCambios}</strong> sin cambios (ya existían y la fila no traía nombre)
+            </>
+          )}
+          {stockCargado > 0 && (
+            <>
+              , <strong>{stockCargado}</strong> SKU con stock inicial ({unidadesCargadas} unidades)
             </>
           )}
           {omitidosPorError > 0 && (
@@ -88,8 +93,8 @@ export function ImportarCsvSkusClient() {
         {filas.length > 0 && (
           <>
             <p className={styles.notaStock}>
-              La cantidad inicial y la bodega se muestran tal cual vienen en el archivo, pero todavía no se guardan en ningún lado — el
-              movimiento de stock de la importación queda pendiente de Z-ML-06 (issue #57).
+              La cantidad inicial se guarda como entrada en la bodega indicada (o en la principal si viene vacía), solo para los SKU
+              nuevos.
             </p>
             <Tabla encabezados={["SKU", "Nombre", "Bodega", "Cantidad inicial", "Estado"]}>
               {filas.map((fila) => (
@@ -98,10 +103,10 @@ export function ImportarCsvSkusClient() {
                     <strong><SkuCopiable sku={fila.sku} /></strong>
                   </CeldaTabla>
                   <CeldaTabla>{fila.nombre ?? <span className={styles.vacioCelda}>— (usa el código)</span>}</CeldaTabla>
-                  <CeldaTabla>{fila.bodega ?? "—"}</CeldaTabla>
+                  <CeldaTabla>{fila.bodegaResuelta ?? "—"}</CeldaTabla>
                   <CeldaTabla>{fila.cantidadInicial}</CeldaTabla>
                   <CeldaTabla>
-                    {fila.yaExiste ? <Chip estado="aviso">Ya existe</Chip> : <Chip estado="exito">Nuevo</Chip>}
+                    {fila.yaExiste ? <Chip estado="aviso">Ya existe · sin stock</Chip> : <Chip estado="exito">Nuevo</Chip>}
                   </CeldaTabla>
                 </FilaTabla>
               ))}
