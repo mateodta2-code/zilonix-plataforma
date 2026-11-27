@@ -269,7 +269,7 @@ export function resolverRangoVentas(
 // URL del detalle (Finanzas → Ventas y Pedidos → Detalle día a día)
 // ---------------------------------------------------------------------------
 
-export type FiltrosUrlVentas = { cuenta?: string; desde: string; hasta: string; costo?: "con" | "sin" };
+export type FiltrosUrlVentas = { cuenta?: string; desde: string; hasta: string; costo?: "con" | "sin"; buscar?: string };
 
 // Arma el href de una página del detalle conservando los filtros. extra
 // va primero: parámetros fijos de la ruta que pinta la tabla, si los
@@ -282,4 +282,36 @@ export function hrefVentasUtilidad(ruta: string, extra: Record<string, string>, 
   if (filtros.costo) params.set("costo", filtros.costo);
   if (pagina > 1) params.set("pagina", String(pagina));
   return `${ruta}?${params.toString()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Buscador del detalle (27-nov): SKU, número de orden o nombre del producto
+// ---------------------------------------------------------------------------
+
+// Tope del texto que llega por la URL: nada más largo que un título de ML.
+const BUSQUEDA_MAXIMO = 120;
+
+// Texto de búsqueda listo para comparar: sin espacios de más, sin el «#»
+// con que se copia un número de orden, en minúscula y sin tildes. Vacío
+// = sin búsqueda (null). Solo se compara en memoria: nunca entra al SQL.
+export function normalizarBusqueda(texto: string | undefined | null): string | null {
+  if (!texto) return null;
+  const limpio = sinTildes(texto.trim().replace(/^#+/, "").slice(0, BUSQUEDA_MAXIMO)).toLowerCase();
+  return limpio === "" ? null : limpio;
+}
+
+function sinTildes(texto: string): string {
+  return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// ¿La venta coincide? Basta con que el número de orden, o el SKU o el
+// nombre de alguna de sus líneas, contenga el texto.
+export function ventaCoincideBusqueda(
+  busqueda: string,
+  venta: { pedidoIdExterno: string; lineas: { sku: string | null; titulo: string | null }[] }
+): boolean {
+  if (venta.pedidoIdExterno.toLowerCase().includes(busqueda)) return true;
+  return venta.lineas.some(
+    (l) => (l.sku !== null && sinTildes(l.sku).toLowerCase().includes(busqueda)) || (l.titulo !== null && sinTildes(l.titulo).toLowerCase().includes(busqueda))
+  );
 }

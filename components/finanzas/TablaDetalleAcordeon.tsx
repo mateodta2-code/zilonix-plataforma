@@ -7,7 +7,8 @@ import { Chip } from "@/components/marco/Chip";
 import { IconoChevron } from "@/components/marco/iconos";
 import { CeldaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { CeldasMontos } from "./CeldasMontos";
-import { ETIQUETA_FORMA, fechaDiaLegible } from "./formato";
+import { ETIQUETA_FORMA, fechaDiaLegible, mostrarPorcentajeEntero, tonoMargen } from "./formato";
+import { mostrarMonto } from "@/lib/finanzas/montos";
 import estilos from "./ventasUtilidad.module.css";
 import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
@@ -56,6 +57,9 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
 
   return (
     // scroll: el encabezado queda fijo arriba de la caja al bajar (27-nov).
+    // Estilo Zilonix OS (27-nov): el día es una franja con su resumen a la
+    // derecha; la cuenta, una fila resaltada con sus totales; abajo los
+    // productos.
     <Tabla encabezados={encabezados} grupos={grupos} scroll>
       {dias.map((dia) => {
         const diaAbierto = diasAbiertos.has(dia.dia);
@@ -63,7 +67,8 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
         return (
           <Fragment key={dia.dia}>
             <tr className={estilos.filaDia}>
-              <CeldaTabla>
+              <td colSpan={encabezados.length} className={estilos.celdaDia}>
+                <div className={estilos.franjaDia}>
                 <button
                   type="button"
                   className={estilos.controlNivel}
@@ -72,16 +77,28 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                   title={textoDia}
                 >
                   <IconoChevron size={12} className={estilos.chevron} />
-                  {/* 27-nov: fecha legible y palabras completas («Jue 27 nov 2026 · 2 cuentas · 12 ventas»). */}
-                  <span className={estilos.textoNivel}>
-                    <span className={estilos.fechaDia}>{fechaDiaLegible(dia.dia)}</span>
-                    <span className={estilos.conteoNivel}>
-                      {dia.numero_cuentas} {plural(dia.numero_cuentas, "cuenta", "cuentas")} · {dia.numero_ventas} {plural(dia.numero_ventas, "venta", "ventas")}
-                    </span>
+                  {/* Fecha legible y palabras completas («Vie 27 nov 2026 · 2 cuentas · 12 ventas»). */}
+                  <span className={estilos.fechaDia}>{fechaDiaLegible(dia.dia)}</span>
+                  <span className={estilos.conteoNivel}>
+                    {dia.numero_cuentas} {plural(dia.numero_cuentas, "cuenta", "cuentas")} · {dia.numero_ventas} {plural(dia.numero_ventas, "venta", "ventas")}
                   </span>
                 </button>
-              </CeldaTabla>
-              <CeldasMontos t={dia.totales} costo={dia.totales.costo_producto} utilidad={dia.totales.utilidad} />
+                <span className={estilos.resumenDia}>
+                  <span className={estilos.numero}>{mostrarMonto(dia.totales.recaudo)}</span>
+                  {dia.totales.utilidad !== null && (
+                    <>
+                      <span className={estilos.separadorResumen}>·</span>
+                      <span>
+                        Utilidad: <span className={estilos.numero}>{mostrarMonto(dia.totales.utilidad)}</span>
+                      </span>
+                      <span className={`${estilos.numero} ${estilos[`margen_${tonoMargen(dia.totales.porcentaje_utilidad) ?? "sin"}`]}`}>
+                        {mostrarPorcentajeEntero(dia.totales.porcentaje_utilidad)}
+                      </span>
+                    </>
+                  )}
+                </span>
+                </div>
+              </td>
             </tr>
             {diaAbierto &&
               dia.cuentas.map((cuenta) => {
@@ -100,11 +117,7 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                         >
                           <IconoChevron size={12} className={estilos.chevron} />
                           <span className={estilos.textoNivel}>
-                            <span className={estilos.puntoCuenta} aria-hidden="true" />
-                            {cuenta.nickname}
-                            <span className={estilos.conteoNivel}>
-                              {cuenta.numero_ventas} {plural(cuenta.numero_ventas, "venta", "ventas")}
-                            </span>
+                            {cuenta.nickname} · {cuenta.numero_ventas} {plural(cuenta.numero_ventas, "venta", "ventas")}
                           </span>
                         </button>
                       </CeldaTabla>
@@ -112,7 +125,7 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                     </tr>
                     {cuentaAbierta &&
                       cuenta.productos.map((p) => (
-                        <tr key={`${p.pedido_id}-${p.linea}`} className={p.costo_producto === null ? `${estilos.filaProducto} ${estilos.filaSinCosto}` : estilos.filaProducto}>
+                        <tr key={`${p.pedido_id}-${p.linea}`} className={estilos.filaProducto}>
                           <CeldaTabla className={estilos.sangriaProducto}>
                             {/* Bloque de ancho fijo, como Zilonix OS: el título entero
                                 en hasta 2 líneas (27-nov; antes 1 línea con «…») y debajo
@@ -127,7 +140,11 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                                   de pedido. */}
                               <span className={estilos.tituloProducto}>{p.titulo}</span>
                               <div className={estilos.filaDatosProducto}>
-                                <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
+                                {/* Etiqueta de entrega con color, como el OS: Full azul,
+                                    Flex ámbar, Agencia gris. */}
+                                <span className={estilos.chipForma} data-forma={p.forma_entrega}>
+                                  {ETIQUETA_FORMA[p.forma_entrega]}
+                                </span>
                                 {devoluciones.has(p.pedido_id) && (
                                   <Chip estado="peligro" title="Con devolución: revisar">
                                     devolución

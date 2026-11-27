@@ -32,6 +32,7 @@ import {
   RANGO_MAXIMO_DIAS_FINANZAS,
   armarVentaEntrada,
   resumirPorCuenta,
+  ventaCoincideBusqueda,
   type AvisoArmado,
   type CabeceraVentaFila,
   type CorreccionVentaFila,
@@ -59,6 +60,9 @@ export type FiltroVentasUtilidad = {
   desde: Date;
   hastaExclusivo: Date;
   costo?: "con" | "sin";
+  // Buscador del detalle (27-nov), ya normalizado con normalizarBusqueda:
+  // SKU, número de orden o nombre. Se compara en memoria, nunca en el SQL.
+  buscar?: string | null;
 };
 
 export type VentaRechazada = { pedidoId: string; pedidoIdExterno: string; motivo: string };
@@ -195,8 +199,17 @@ export async function listarVentasUtilidad(
   const entradasDetalle = [];
 
   for (const cabecera of cabeceras) {
-    pedidoIdExterno[cabecera.pedidoId] = cabecera.pedidoIdExterno;
     const lineasVenta = lineasPorPedido.get(cabecera.pedidoId) ?? [];
+    if (
+      filtro.buscar &&
+      !ventaCoincideBusqueda(filtro.buscar, {
+        pedidoIdExterno: cabecera.pedidoIdExterno,
+        lineas: lineasVenta.map((l) => ({ sku: l.skuCodigo, titulo: l.titulo })),
+      })
+    ) {
+      continue;
+    }
+    pedidoIdExterno[cabecera.pedidoId] = cabecera.pedidoIdExterno;
     let resultado: ResultadoVenta;
     try {
       const { entrada, avisos } = armarVentaEntrada(
