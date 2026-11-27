@@ -98,3 +98,28 @@ export const AYUDA_COLUMNAS: Record<string, string> = {
   Unidades: "Cuántas unidades se vendieron.",
   "% con costo": "Qué parte de las ventas tiene costo cargado.",
 };
+
+// Semáforo del margen («% util») del detalle (27-nov, cortes elegidos por
+// el usuario, como el Zilonix OS): verde desde 30 %, naranja de 15 % a
+// menos de 30 %, rojo por debajo de 15 % (pérdidas incluidas). Compara en
+// centésimas con texto y BigInt, sin Number (el motor entrega "33.15").
+export const MARGEN_VERDE_DESDE = "30";
+export const MARGEN_NARANJA_DESDE = "15";
+export type TonoMargen = "verde" | "naranja" | "rojo";
+
+function centesimas(valor: string): bigint | null {
+  const m = /^(-?)(\d+)(?:\.(\d{1,2})\d*)?$/.exec(valor);
+  if (!m) return null;
+  const [, signo, entero, dec = ""] = m;
+  const absoluto = BigInt(entero) * BigInt(100) + BigInt(dec.padEnd(2, "0") || "0");
+  return signo === "-" ? -absoluto : absoluto;
+}
+
+export function tonoMargen(valor: string | null): TonoMargen | null {
+  if (valor === null) return null;
+  const v = centesimas(valor);
+  if (v === null) return null;
+  if (v >= (centesimas(MARGEN_VERDE_DESDE) as bigint)) return "verde";
+  if (v >= (centesimas(MARGEN_NARANJA_DESDE) as bigint)) return "naranja";
+  return "rojo";
+}

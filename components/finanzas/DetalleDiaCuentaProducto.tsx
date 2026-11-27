@@ -3,11 +3,11 @@ import { normalizarParametro } from "@/lib/filtros-listado";
 import { listarCuentasMlParaSelector, PARAM_CUENTA, resolverCuentaMl } from "@/lib/ml/selector-cuenta";
 import { mostrarMonto } from "@/lib/finanzas/montos";
 import { listarVentasUtilidad, RangoVentasInvalidoError, type ResultadoVentasUtilidad } from "@/lib/finanzas/ventas-consulta";
-import { porcentajeVentasConCosto, resolverRangoVentas, type FiltrosUrlVentas } from "@/lib/finanzas/ventas-pantalla";
+import { normalizarBusqueda, porcentajeVentasConCosto, resolverRangoVentas, type FiltrosUrlVentas } from "@/lib/finanzas/ventas-pantalla";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
+import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
@@ -39,13 +39,9 @@ import estilos from "./ventasUtilidad.module.css";
 // Antes: Nº ventas, Dev., % util, % ML, Cnt.
 const NOMBRES_COLUMNAS = ["Ventas", "Recaudo", "Comisión ML", "Flete ML", "Costo", "Packing", "Envío", "Utilidad", "Margen", "% comisión", "Unidades"];
 
-// Utilidad y Margen van en la franja de «Lo que ganaste».
-const COLUMNAS_RESULTADO = new Set(["Utilidad", "Margen"]);
-
 function encabezado(nombre: string): EncabezadoTabla {
   return {
     clave: nombre,
-    className: COLUMNAS_RESULTADO.has(nombre) ? estilos.resultado : undefined,
     contenido: (
       <span className={estilos.encabezadoAyuda} title={AYUDA_COLUMNAS[nombre]}>
         {nombre}
@@ -57,19 +53,6 @@ function encabezado(nombre: string): EncabezadoTabla {
 const COLUMNAS_DETALLE: EncabezadoTabla[] = [{ clave: "nivel", contenido: "Día · cuenta · producto" }, ...NOMBRES_COLUMNAS.map(encabezado)];
 const COLUMNAS_TOTAL_CUENTA: EncabezadoTabla[] = [{ clave: "cuenta", contenido: "Cuenta" }, ...NOMBRES_COLUMNAS.map(encabezado), encabezado("% con costo")];
 
-// La tabla se lee como la fórmula: lo que vendiste, lo que se descuenta
-// y lo que ganaste (mismo orden que NOMBRES_COLUMNAS).
-function gruposColumnas(columnasDatos: number): GrupoEncabezado[] {
-  return [
-    { clave: "nivel", etiqueta: "", columnas: 1, className: estilos.grupoVacio },
-    { clave: "vendiste", etiqueta: "Lo que vendiste", columnas: 2, className: estilos.grupo },
-    { clave: "descuenta", etiqueta: "Lo que se descuenta", columnas: 5, className: estilos.grupo },
-    { clave: "ganaste", etiqueta: "Lo que ganaste", columnas: 2, className: `${estilos.grupo} ${estilos.grupoResultado}` },
-    { clave: "datos", etiqueta: "Datos", columnas: columnasDatos, className: estilos.grupo },
-  ];
-}
-const GRUPOS_DETALLE = gruposColumnas(2);
-const GRUPOS_TOTAL_CUENTA = gruposColumnas(3);
 
 type Props = {
   empresaId: string;
@@ -118,6 +101,10 @@ export async function DetalleDiaCuentaProducto({
   const costoParam = normalizarParametro(searchParams.costo);
   const costo = costoParam === "con" || costoParam === "sin" ? costoParam : undefined;
   const rango = resolverRangoVentas(normalizarParametro(searchParams.desde), normalizarParametro(searchParams.hasta), new Date(), rangoMaximoDias);
+  // Buscador (27-nov): SKU, número de orden o nombre. Param «buscar» (no
+  // «q»: Pedidos ya usa «q» para su propia lista).
+  const buscarTexto = (normalizarParametro(searchParams.buscar) ?? "").slice(0, 120);
+  const buscar = normalizarBusqueda(buscarTexto);
 
   let datos: ResultadoVentasUtilidad | null = null;
   let errorRango = rango.error ?? null;
@@ -128,6 +115,7 @@ export async function DetalleDiaCuentaProducto({
         desde: rango.rango.inicio,
         hastaExclusivo: rango.rango.finExclusivo,
         costo,
+        buscar,
       });
     } catch (error) {
       if (!(error instanceof RangoVentasInvalidoError)) throw error;
@@ -137,7 +125,7 @@ export async function DetalleDiaCuentaProducto({
 
   const desdeForm = rango.rango?.desde ?? normalizarParametro(searchParams.desde) ?? "";
   const hastaForm = rango.rango?.hasta ?? normalizarParametro(searchParams.hasta) ?? "";
-  const filtros: FiltrosUrlVentas = { cuenta: cuentaId ?? undefined, desde: desdeForm, hasta: hastaForm, costo };
+  const filtros: FiltrosUrlVentas = { cuenta: cuentaId ?? undefined, desde: desdeForm, hasta: hastaForm, costo, buscar: buscar ?? undefined };
   const hrefMesActual = Object.keys(extra).length > 0 ? `${ruta}?${new URLSearchParams(extra).toString()}` : ruta;
 
   const total = datos?.detalle.total;
@@ -176,6 +164,9 @@ export async function DetalleDiaCuentaProducto({
         </Campo>
         <Campo etiqueta="Hasta">
           <input type="date" name="hasta" defaultValue={hastaForm} className="zx-control" />
+        </Campo>
+        <Campo etiqueta="Buscar SKU, orden o producto">
+          <input type="search" name="buscar" defaultValue={buscarTexto} placeholder="Ej. FULCOL5737X2 o 2000019826695536" className="zx-control" />
         </Campo>
         <Campo etiqueta="Costo">
           <select name="costo" defaultValue={costo ?? ""} className="zx-control">
@@ -235,7 +226,9 @@ export async function DetalleDiaCuentaProducto({
 
           {total.ventas === 0 ? (
             <EstadoVacio>
-              {mensajeVacio ?? (
+              {buscar ? (
+                <>No hay ventas que coincidan con «{buscarTexto}» en este rango. Revisa el SKU o el número de orden, o amplía las fechas.</>
+              ) : mensajeVacio ?? (
                 <>
                   No hay ventas con foto financiera en este rango.
                   {puedeTraerVentas && " Si las ventas de este mes no aparecen, usa «Traer ventas de este mes»."}
@@ -247,7 +240,7 @@ export async function DetalleDiaCuentaProducto({
               {mostrarResumen && (
                 <section className={estilos.seccion}>
                   <h2 className={estilos.tituloSeccion}>Total por cuenta, antes de publicidad</h2>
-                  <Tabla encabezados={COLUMNAS_TOTAL_CUENTA} grupos={GRUPOS_TOTAL_CUENTA}>
+                  <Tabla encabezados={COLUMNAS_TOTAL_CUENTA}>
                     {datos.resumenCuentas.map((c) => (
                       <FilaTabla key={c.cuenta_ml_id}>
                         <CeldaTabla>
@@ -280,9 +273,8 @@ export async function DetalleDiaCuentaProducto({
                   {/* La key cambia con los filtros: el acordeón vuelve a
                       abrir solo el día más nuevo del rango. */}
                   <TablaDetalleAcordeon
-                    key={`${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}`}
+                    key={`${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}|${filtros.buscar ?? ""}`}
                     encabezados={COLUMNAS_DETALLE}
-                    grupos={GRUPOS_DETALLE}
                     dias={dias}
                     pedidoIdExterno={pedidoIdExternoRango}
                     conDevolucion={[...conDevolucion].filter((id) => idsRango.has(id))}

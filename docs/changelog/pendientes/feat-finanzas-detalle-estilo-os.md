@@ -1,0 +1,3 @@
+- Detalle día a día (Ventas y utilidad y Pedidos) con el estilo del Zilonix OS: el día es una franja con recaudo, utilidad y margen a la derecha; la cuenta una fila resaltada con sus totales; encabezados en minúscula; números de ancho fijo; etiqueta de entrega con color (Full azul, Flex ámbar, Agencia gris). Se quitan los grupos de columnas y los «−».
+- Semáforo del margen: verde desde 30 %, naranja de 15 % a 29 %, rojo por debajo de 15 % (cortes elegidos por el usuario).
+- Buscador «Buscar SKU, orden o producto» en los filtros (parámetro `buscar`): deja solo las ventas cuyo número de orden, SKU o nombre contiene el texto; los totales y tarjetas se recalculan con esas ventas.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fechaDiaLegible, mostrarPorcentaje, mostrarPorcentajeEntero } from "./formato";
+import { fechaDiaLegible, mostrarPorcentaje, mostrarPorcentajeEntero, tonoMargen } from "./formato";
 
 // Issue #131 — % de la tabla del detalle sin decimales (Sharel, 29-oct).
 
@@ -34,5 +34,22 @@ describe("fechaDiaLegible (detalle día a día, 27-nov)", () => {
   it("deja tal cual lo que no es un día real", () => {
     expect(fechaDiaLegible("2026-02-30")).toBe("2026-02-30");
     expect(fechaDiaLegible("hoy")).toBe("hoy");
+  });
+});
+
+describe("tonoMargen (semáforo 30 % / 15 %, 27-nov)", () => {
+  it("verde desde 30 %, naranja de 15 % a 29,99 %, rojo debajo de 15 % y en pérdida", () => {
+    expect(tonoMargen("30")).toBe("verde");
+    expect(tonoMargen("32.10")).toBe("verde");
+    expect(tonoMargen("29.99")).toBe("naranja");
+    expect(tonoMargen("25")).toBe("naranja");
+    expect(tonoMargen("15.00")).toBe("naranja");
+    expect(tonoMargen("14.99")).toBe("rojo");
+    expect(tonoMargen("0")).toBe("rojo");
+    expect(tonoMargen("-5.50")).toBe("rojo");
+  });
+  it("sin margen o con un texto raro no pinta color", () => {
+    expect(tonoMargen(null)).toBeNull();
+    expect(tonoMargen("abc")).toBeNull();
   });
 });

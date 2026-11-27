@@ -5,6 +5,8 @@ import {
   armarVentaEntrada,
   hrefVentasUtilidad,
   mesActualBogota,
+  normalizarBusqueda,
+  ventaCoincideBusqueda,
   porcentajeVentasConCosto,
   RANGO_MAXIMO_DIAS_FINANZAS,
   resolverRangoVentas,
@@ -202,5 +204,21 @@ describe("hrefVentasUtilidad (issue #131)", () => {
 
   it("los parámetros fijos de la ruta van primero", () => {
     expect(hrefVentasUtilidad("/x", { a: "1" }, { desde: "2026-10-01", hasta: "2026-10-01" }, 1)).toBe("/x?a=1&desde=2026-10-01&hasta=2026-10-01");
+  });
+});
+
+describe("buscador del detalle (27-nov)", () => {
+  const venta = { pedidoIdExterno: "2000019826695536", lineas: [{ sku: "FULCOL5737X2", titulo: "Bebedero Para Colibríes Con 5 Puertos" }] };
+  it("normaliza: sin espacios, sin #, minúscula y sin tildes; vacío = sin búsqueda", () => {
+    expect(normalizarBusqueda("  #2000019826695536 ")).toBe("2000019826695536");
+    expect(normalizarBusqueda("Colibríes")).toBe("colibries");
+    expect(normalizarBusqueda("   ")).toBeNull();
+    expect(normalizarBusqueda(undefined)).toBeNull();
+  });
+  it("coincide por número de orden, SKU o nombre (parcial)", () => {
+    expect(ventaCoincideBusqueda(normalizarBusqueda("6695536") as string, venta)).toBe(true);
+    expect(ventaCoincideBusqueda(normalizarBusqueda("fulcol5737") as string, venta)).toBe(true);
+    expect(ventaCoincideBusqueda(normalizarBusqueda("colibries") as string, venta)).toBe(true);
+    expect(ventaCoincideBusqueda(normalizarBusqueda("orejeras") as string, venta)).toBe(false);
   });
 });

@@ -606,59 +606,142 @@
 }
 
 /* ---------------------------------------------------------------------
-   27-nov — diseño visual del detalle (vista previa aprobada por el
-   usuario): grupos de columnas, descuentos en gris con «−», franja de
-   «Lo que ganaste», jerarquía de filas, ventas sin costo marcadas y
-   primera columna fija. Solo tokens existentes de globals.css: el aviso
-   usa el mismo tono que el chip «aviso» (acento), no un color nuevo.
+   27-nov — detalle día a día con el estilo del Zilonix OS (pedido del
+   usuario, con la información que ya tiene esta tabla): el día es una
+   franja con su resumen a la derecha, la cuenta una fila resaltada con
+   sus totales, encabezados en minúscula, números de ancho fijo, etiqueta
+   de entrega con color y el margen con semáforo (30 % / 15 %).
+   Solo tokens existentes; el ámbar es --kpi-advertencia-texto.
    --------------------------------------------------------------------- */
 
-/* Fila de grupos encima de los encabezados. */
-/* Solo la fila de nombres queda fija al bajar; la de grupos se va con
-   la tabla (si las dos fueran sticky a top: 0, se taparían). */
-.tablaCompacta th.grupo,
-.tablaCompacta th.grupoVacio {
-  position: static;
-  padding: 8px 6px 0;
-  text-align: center !important;
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  color: var(--plata-medio);
-  border-bottom: 0;
+.tablaCompacta {
+  --semaforo-naranja: var(--kpi-advertencia-texto);
 }
 
-.tablaCompacta th.grupo {
-  box-shadow: inset 0 -2px 0 var(--borde);
-  padding-bottom: 4px;
+/* En claro el ámbar casi no se lee sobre blanco: se oscurece con el
+   mismo --texto del tema, sin color nuevo. */
+:global(:root[data-tema="claro"]) .tablaCompacta {
+  --semaforo-naranja: color-mix(in srgb, var(--kpi-advertencia-texto) 62%, var(--texto));
 }
 
-.tablaCompacta th.grupoResultado {
-  color: var(--acento-fuerte);
-  box-shadow: inset 0 -2px 0 var(--acento);
-}
-
-/* Lo que se descuenta: gris y con «−». */
-.menos {
+/* Encabezados como el OS: minúscula, suaves, sin espaciado de etiqueta. */
+.tablaCompacta th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 11px;
   color: var(--texto-suave);
 }
 
-.menos::before {
-  content: "−";
-  margin-right: 2px;
-  color: var(--plata-oscuro);
+/* Números de ancho fijo, alineados como en el OS. */
+.tablaCompacta .numero {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
 }
 
-/* Franja de «Lo que ganaste» (Utilidad y Margen). En el encabezado
-   fijo va encima de su fondo opaco, para que no se vea la tabla por
-   debajo al bajar. */
-/* Sin fondo azul (pedido del usuario, 27-nov): la franja se ve solo por
-   el color de los números y la línea azul del grupo. */
+/* Día: una sola franja con fecha y conteo a la izquierda y el resumen
+   (recaudo · utilidad · margen) a la derecha. */
+.celdaDia {
+  padding: 9px 10px;
+}
 
-.tablaCompacta td.resultado {
+.franjaDia {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+  flex-wrap: wrap;
+}
+
+.tablaCompacta .franjaDia .controlNivel {
+  width: auto;
+}
+
+.fechaDia {
+  font-size: 13px;
   font-weight: 700;
 }
 
+.conteoNivel {
+  margin-left: 8px;
+  font-weight: 500;
+  font-size: 11.5px;
+  color: var(--texto-suave);
+}
+
+.resumenDia {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.separadorResumen {
+  color: var(--plata-oscuro);
+}
+
+/* Cuenta: fila resaltada con sus totales. */
+.tablaCompacta .filaCuenta td {
+  background: color-mix(in srgb, var(--acento) 9%, var(--tabla-fondo));
+  font-weight: 700;
+}
+
+/* Producto: un poco más de aire. */
+.tablaCompacta .filaProducto td {
+  padding-block: 7px;
+}
+
+/* Etiqueta de entrega con color: Full azul, Flex ámbar, Agencia gris. */
+.chipForma {
+  padding: 0 6px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--texto-suave);
+}
+
+.chipForma[data-forma="full_ml"] {
+  border-color: var(--acento);
+  color: var(--acento-fuerte);
+}
+
+.chipForma[data-forma="flex"] {
+  border-color: var(--semaforo-naranja);
+  color: var(--semaforo-naranja);
+}
+
+/* Utilidad: verde si gana, rojo si pierde (.positivo/.negativo, arriba). */
+.utilidadCelda {
+  font-weight: 600;
+}
+
 .cero {
+  color: inherit;
+}
+
+/* Semáforo del margen (tonoMargen). */
+.margen_verde,
+.margen_naranja,
+.margen_rojo {
+  font-weight: 700;
+}
+
+.margen_verde {
+  color: var(--exito-texto);
+}
+
+.margen_naranja {
+  color: var(--semaforo-naranja);
+}
+
+.margen_rojo {
+  color: var(--peligro-texto);
+}
+
+.margen_sin {
   color: inherit;
 }
 
@@ -666,78 +749,14 @@
   color: var(--plata-oscuro);
 }
 
-.pastilla {
-  display: inline-block;
-  min-width: 42px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  text-align: center;
-  font-weight: 700;
-}
-
-.pastilla_positivo {
-  color: var(--exito-texto);
-  background: color-mix(in srgb, var(--exito-texto) 15%, transparent);
-}
-
-.pastilla_negativo {
-  color: var(--peligro-texto);
-  background: color-mix(in srgb, var(--peligro-texto) 15%, transparent);
-}
-
-.pastilla_cero {
-  color: var(--texto-suave);
-  background: var(--tabla-encabezado-fondo);
-}
-
-/* Día: barra de acento a la izquierda, fecha más grande y conteo suave. */
-.tablaCompacta .filaDia td:first-child {
-  box-shadow: inset 3px 0 0 var(--acento);
-}
-
-.tablaCompacta .filaDia td {
-  padding-block: 8px;
-}
-
-.fechaDia {
-  font-size: 13px;
-}
-
-.conteoNivel {
-  margin-left: 8px;
-  font-weight: 500;
-  font-size: 11px;
-  color: var(--texto-suave);
-}
-
-/* Cuenta: punto azul metal antes del nombre. */
-.puntoCuenta {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--gradiente-azul-metal);
-  vertical-align: middle;
-}
-
-/* Producto: más aire. */
-.tablaCompacta .filaProducto td {
-  padding-block: 7px;
-}
-
-/* Venta sin costo: barra de aviso a la izquierda y «Cargar costo» como
-   botón chico. */
-.tablaCompacta .filaSinCosto td:first-child {
-  box-shadow: inset 3px 0 0 var(--acento);
-}
-
+/* «Cargar costo» en una venta sin costo: botón chico. */
 .botonCosto {
   display: inline-block;
   padding: 2px 9px;
   border: 1px solid var(--acento);
   border-radius: 8px;
   color: var(--acento-fuerte);
+  font-family: var(--fuente-texto);
   font-size: 11px;
   font-weight: 600;
   text-decoration: none;
@@ -750,25 +769,27 @@
   outline: none;
 }
 
-/* Primera columna fija al moverse de costado (con fondo propio para
-   que los números no se vean por debajo). El encabezado ya queda fijo
-   arriba con <Tabla scroll>. */
-.tablaCompacta td:first-child {
+/* Primera columna fija al moverse de costado (con fondo propio para que
+   los números no se vean por debajo). El encabezado ya queda fijo arriba
+   con <Tabla scroll>. La franja del día ocupa toda la fila. */
+.tablaCompacta .filaProducto td:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
   background: var(--tabla-fondo);
 }
 
-.tablaCompacta .filaDia td:first-child {
-  background: var(--tabla-encabezado-fondo);
+.tablaCompacta .filaCuenta td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
 }
 
 .tablaCompacta .filaProducto:hover td:first-child {
   background: linear-gradient(var(--fila-hover), var(--fila-hover)), var(--tabla-fondo);
 }
 
-/* Número de pedido: abre el detalle de la venta (el título ya no es link). */
+/* Número de pedido: abre el detalle de la venta (el título no es link). */
 .tablaCompacta .enlacePedido {
   color: var(--acento-fuerte);
   text-decoration: none;
