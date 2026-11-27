@@ -55,6 +55,8 @@ export const PATRONES_RUTAS_PUBLICAS = [
   // NO es pública: exige sesión.
   "/bodega/registro(.*)",
   "/domiciliario/iniciar-sesion(.*)",
+  // Autorregistro del domiciliario: aún no tiene sesión; /crear-perfil sí la exige.
+  "/domiciliario/registro(.*)",
   "/invitacion-bodega(.*)",
   "/empezar",
   // Tarea 1.7 — quien recibe una invitación por correo todavía no

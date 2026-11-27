@@ -8,7 +8,8 @@ import { accesoBodega } from "@/lib/bodega/contexto";
 // que en el panel del vendedor.
 export default async function DomiciliarioLayout({ children }: { children: ReactNode }) {
   const { usuario, clerkUser, decision } = await accesoBodega("domiciliario");
-  if (!decision.ok) return <SinAccesoBodega motivo={decision.motivo} />;
+  // En espera: se ve el marco del domiciliario (la página explica); las páginas de entregas siguen exigiendo membresía.
+  if (!decision.ok && decision.motivo !== "en-espera") return <SinAccesoBodega motivo={decision.motivo} />;
 
   return (
     <MarcoApp

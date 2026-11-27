@@ -11,7 +11,7 @@ export type MembresiaBodega = {
   activo: boolean;
 };
 
-export type MotivoSinAcceso = "sin-membresia" | "desactivado" | "rol-incorrecto" | "suspendida";
+export type MotivoSinAcceso = "en-espera" | "sin-membresia" | "desactivado" | "rol-incorrecto" | "suspendida";
 
 export type DecisionAcceso = { ok: true; membresia: MembresiaBodega } | { ok: false; motivo: MotivoSinAcceso; membresia?: MembresiaBodega };
 
@@ -20,7 +20,19 @@ export function decidirAcceso(params: {
   membresias: MembresiaBodega[];
   bodegaPreferidaId?: string;
   soloAdmin?: boolean;
+  // Se registró como domiciliario (perfiles_domiciliario) pero ninguna bodega lo ha invitado.
+  tienePerfilDomiciliario?: boolean;
 }): DecisionAcceso {
+  const decision = decidirPorMembresias(params);
+  // Con perfil, «en espera» gana sobre sin-membresia y rol-incorrecto (un admin de
+  // bodega con perfil también espera). Desactivado y suspendida siguen mandando.
+  if (!decision.ok && params.panel === "domiciliario" && params.tienePerfilDomiciliario && (decision.motivo === "sin-membresia" || decision.motivo === "rol-incorrecto")) {
+    return { ok: false, motivo: "en-espera" };
+  }
+  return decision;
+}
+
+function decidirPorMembresias(params: { panel: Panel; membresias: MembresiaBodega[]; bodegaPreferidaId?: string; soloAdmin?: boolean }): DecisionAcceso {
   const { panel, membresias, bodegaPreferidaId, soloAdmin } = params;
   if (membresias.length === 0) return { ok: false, motivo: "sin-membresia" };
 
@@ -42,6 +54,7 @@ export function decidirAcceso(params: {
 }
 
 export const MENSAJE_SIN_ACCESO: Record<MotivoSinAcceso, string> = {
+  "en-espera": "Aún no estás en ninguna bodega. Pídele a la bodega que te invite con tu correo.",
   "sin-membresia": "Esta cuenta no pertenece a ninguna bodega. Pide una invitación a quien administra tu bodega.",
   desactivado: "Tu acceso a esta bodega está desactivado. Escribe a quien la administra.",
   "rol-incorrecto": "Tu rol no tiene acceso a esta pantalla.",

@@ -1,3 +1,4 @@
+import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAccesoBodega } from "@/components/bodega/SinAccesoBodega";
 import { accesoBodega } from "@/lib/bodega/contexto";
@@ -10,6 +11,14 @@ export const dynamic = "force-dynamic";
 // Inicio del domiciliario: quién es, de qué bodega, y lo que viene.
 export default async function DomiciliarioInicioPage() {
   const { usuario, decision } = await accesoBodega("domiciliario");
+  if (!decision.ok && decision.motivo === "en-espera") {
+    return (
+      <>
+        <EncabezadoPagina titulo={`Hola, ${usuario.nombre}`} />
+        <EstadoVacio>Aún no estás en ninguna bodega. Pídele a la bodega que te invite con este correo: {usuario.email}.</EstadoVacio>
+      </>
+    );
+  }
   if (!decision.ok) return <SinAccesoBodega motivo={decision.motivo} />;
 
   const [entregas, novedades] = await Promise.all([

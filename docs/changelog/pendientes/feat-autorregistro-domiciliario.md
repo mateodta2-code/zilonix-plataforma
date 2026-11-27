@@ -1,0 +1,1 @@
+- Autorregistro del domiciliario: `/domiciliario/registro`, `/domiciliario/crear-perfil` y estado «en espera» del panel hasta que una bodega lo invite (Refs #723).
