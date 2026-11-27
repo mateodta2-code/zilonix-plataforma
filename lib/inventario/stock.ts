@@ -77,12 +77,7 @@ export async function listarInventario(
 ): Promise<{ filas: FilaInventario[]; total: number; pagina: number; totalPaginas: number }> {
   const busqueda = normalizarTextoBusqueda(filtro.busqueda);
   return dbComoEmpresa(empresaId, async (tx) => {
-    const condiciones: SQL[] = [eq(skus.empresaId, empresaId)];
-    if (busqueda) {
-      const patron = `%${escaparComodinesLike(busqueda)}%`;
-      condiciones.push(or(ilike(skus.codigo, patron), ilike(skus.nombre, patron))!);
-    }
-    const where = and(...condiciones);
+    const where = condicionesInventario(empresaId, busqueda);
     const [{ total }] = await tx.select({ total: sql<number>`count(*)::int` }).from(skus).where(where);
     const totalPaginas = Math.max(1, Math.ceil(Number(total) / TAMANO_PAGINA_INVENTARIO));
     const pagina = Math.min(Math.max(1, Math.trunc(filtro.pagina ?? 1) || 1), totalPaginas);
@@ -93,34 +88,89 @@ export async function listarInventario(
       .orderBy(asc(skus.codigo))
       .limit(TAMANO_PAGINA_INVENTARIO)
       .offset((pagina - 1) * TAMANO_PAGINA_INVENTARIO);
-    const ids = pageSkus.map((s) => s.id);
-    const saldos = ids.length
-      ? await tx
-          .select({
-            skuId: stockBodega.skuId,
-            bodegaId: stockBodega.bodegaId,
-            disponible: stockBodega.disponible,
-            reservado: stockBodega.reservado,
-            enTransito: stockBodega.enTransito,
-          })
-          .from(stockBodega)
-          .where(and(eq(stockBodega.empresaId, empresaId), inArray(stockBodega.skuId, ids)))
-      : [];
-    const publicable = await disponiblePublicadoTx(tx, empresaId, ids);
-    const filas = pageSkus.map((s) => {
-      const porBodega = saldos.filter((x) => x.skuId === s.id).map(({ skuId: _skuId, ...resto }) => resto);
-      return {
-        skuId: s.id,
-        codigo: s.codigo,
-        nombre: s.nombre,
-        esKit: s.esKit,
-        porBodega,
-        totalDisponible: porBodega.reduce((n, b) => n + b.disponible, 0),
-        totalReservado: porBodega.reduce((n, b) => n + b.reservado, 0),
-        publicable: publicable.get(s.id) ?? 0,
-      };
-    });
+    const filas = await armarFilasInventarioTx(tx, empresaId, pageSkus);
     return { filas, total: Number(total), pagina, totalPaginas };
+  });
+}
+
+// Mismo filtro de búsqueda para la pantalla y para el CSV.
+function condicionesInventario(empresaId: string, busqueda: string | null | undefined): SQL | undefined {
+  const condiciones: SQL[] = [eq(skus.empresaId, empresaId)];
+  if (busqueda) {
+    const patron = `%${escaparComodinesLike(busqueda)}%`;
+    condiciones.push(or(ilike(skus.codigo, patron), ilike(skus.nombre, patron))!);
+  }
+  return and(...condiciones);
+}
+
+// Saldos por bodega y publicable de un lote de SKU ya elegido (una
+// página de la pantalla, o todo lo que cabe en el CSV).
+async function armarFilasInventarioTx(
+  tx: Tx,
+  empresaId: string,
+  lote: { id: string; codigo: string; nombre: string; esKit: boolean }[]
+): Promise<FilaInventario[]> {
+  const ids = lote.map((s) => s.id);
+  const saldos = ids.length
+    ? await tx
+        .select({
+          skuId: stockBodega.skuId,
+          bodegaId: stockBodega.bodegaId,
+          disponible: stockBodega.disponible,
+          reservado: stockBodega.reservado,
+          enTransito: stockBodega.enTransito,
+        })
+        .from(stockBodega)
+        .where(and(eq(stockBodega.empresaId, empresaId), inArray(stockBodega.skuId, ids)))
+    : [];
+  const publicable = await disponiblePublicadoTx(tx, empresaId, ids);
+  // Agrupado una vez por SKU: con 20.000 SKU del CSV, un filter por
+  // fila sería cuadrático.
+  const saldosPorSku = new Map<string, SaldoEnBodega[]>();
+  for (const { skuId, ...resto } of saldos) {
+    const lista = saldosPorSku.get(skuId);
+    if (lista) lista.push(resto);
+    else saldosPorSku.set(skuId, [resto]);
+  }
+  return lote.map((s) => {
+    const porBodega = saldosPorSku.get(s.id) ?? [];
+    return {
+      skuId: s.id,
+      codigo: s.codigo,
+      nombre: s.nombre,
+      esKit: s.esKit,
+      porBodega,
+      totalDisponible: porBodega.reduce((n, b) => n + b.disponible, 0),
+      totalReservado: porBodega.reduce((n, b) => n + b.reservado, 0),
+      publicable: publicable.get(s.id) ?? 0,
+    };
+  });
+}
+
+// Topes del CSV: se arma en memoria, así que se corta antes de que un
+// archivo enorme tumbe el servidor. Se pide una fila de más para saber
+// si quedó algo afuera (recortado), sin contar toda la tabla.
+export const TOPE_EXPORTAR_INVENTARIO = 20_000;
+export const TOPE_EXPORTAR_KARDEX = 50_000;
+
+// Todo el inventario (sin páginas, hasta el tope) para el CSV de
+// /panel/inventario, con la misma búsqueda y el mismo orden que la tabla.
+export async function listarInventarioParaExportar(
+  empresaId: string,
+  filtro: { busqueda?: string } = {},
+  tope: number = TOPE_EXPORTAR_INVENTARIO
+): Promise<{ filas: FilaInventario[]; recortado: boolean }> {
+  const busqueda = normalizarTextoBusqueda(filtro.busqueda);
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const lote = await tx
+      .select({ id: skus.id, codigo: skus.codigo, nombre: skus.nombre, esKit: skus.esKit })
+      .from(skus)
+      .where(condicionesInventario(empresaId, busqueda))
+      .orderBy(asc(skus.codigo))
+      .limit(tope + 1);
+    const recortado = lote.length > tope;
+    const filas = await armarFilasInventarioTx(tx, empresaId, lote.slice(0, tope));
+    return { filas, recortado };
   });
 }
 
@@ -199,43 +249,63 @@ export type FilaKardex = {
 
 export const TAMANO_PAGINA_KARDEX = 50;
 
+// Misma consulta para la pantalla y el CSV: mismos filtros, mismo
+// orden (lo más reciente primero). Los ids llegan ya validados como
+// UUID; acá solo entran como valores, nunca como SQL.
+function consultaKardexTx(tx: Tx, empresaId: string, filtro: { skuId?: string; bodegaId?: string }) {
+  const condiciones: SQL[] = [eq(kardexMovimientos.empresaId, empresaId)];
+  if (filtro.skuId) condiciones.push(eq(kardexMovimientos.skuId, filtro.skuId));
+  if (filtro.bodegaId) condiciones.push(eq(kardexMovimientos.bodegaId, filtro.bodegaId));
+  return tx
+    .select({
+      id: kardexMovimientos.id,
+      ts: kardexMovimientos.ts,
+      tipo: kardexMovimientos.tipo,
+      origen: kardexMovimientos.origen,
+      skuCodigo: skus.codigo,
+      bodegaNombre: bodegas.nombre,
+      deltaDisponible: kardexMovimientos.deltaDisponible,
+      deltaReservado: kardexMovimientos.deltaReservado,
+      saldoDisponible: kardexMovimientos.saldoDisponible,
+      saldoReservado: kardexMovimientos.saldoReservado,
+      actorTipo: kardexMovimientos.actorTipo,
+      actorNombre: usuarios.nombre,
+      referenciaId: kardexMovimientos.referenciaId,
+      nota: kardexMovimientos.nota,
+    })
+    .from(kardexMovimientos)
+    .innerJoin(skus, and(eq(skus.empresaId, kardexMovimientos.empresaId), eq(skus.id, kardexMovimientos.skuId)))
+    .innerJoin(bodegas, and(eq(bodegas.empresaId, kardexMovimientos.empresaId), eq(bodegas.id, kardexMovimientos.bodegaId)))
+    .leftJoin(usuarios, eq(usuarios.id, kardexMovimientos.usuarioId))
+    .where(and(...condiciones))
+    .orderBy(desc(kardexMovimientos.ts), desc(kardexMovimientos.linea));
+}
+
 export async function listarKardex(
   empresaId: string,
   filtro: { skuId?: string; bodegaId?: string; pagina?: number } = {}
 ): Promise<{ filas: FilaKardex[]; pagina: number; hayMas: boolean }> {
   const pagina = Math.max(1, Math.trunc(filtro.pagina ?? 1) || 1);
   return dbComoEmpresa(empresaId, async (tx) => {
-    const condiciones: SQL[] = [eq(kardexMovimientos.empresaId, empresaId)];
-    if (filtro.skuId) condiciones.push(eq(kardexMovimientos.skuId, filtro.skuId));
-    if (filtro.bodegaId) condiciones.push(eq(kardexMovimientos.bodegaId, filtro.bodegaId));
     // Se pide una fila de más para saber si hay página siguiente sin
     // contar toda la tabla (el kardex solo crece).
-    const filas = await tx
-      .select({
-        id: kardexMovimientos.id,
-        ts: kardexMovimientos.ts,
-        tipo: kardexMovimientos.tipo,
-        origen: kardexMovimientos.origen,
-        skuCodigo: skus.codigo,
-        bodegaNombre: bodegas.nombre,
-        deltaDisponible: kardexMovimientos.deltaDisponible,
-        deltaReservado: kardexMovimientos.deltaReservado,
-        saldoDisponible: kardexMovimientos.saldoDisponible,
-        saldoReservado: kardexMovimientos.saldoReservado,
-        actorTipo: kardexMovimientos.actorTipo,
-        actorNombre: usuarios.nombre,
-        referenciaId: kardexMovimientos.referenciaId,
-        nota: kardexMovimientos.nota,
-      })
-      .from(kardexMovimientos)
-      .innerJoin(skus, and(eq(skus.empresaId, kardexMovimientos.empresaId), eq(skus.id, kardexMovimientos.skuId)))
-      .innerJoin(bodegas, and(eq(bodegas.empresaId, kardexMovimientos.empresaId), eq(bodegas.id, kardexMovimientos.bodegaId)))
-      .leftJoin(usuarios, eq(usuarios.id, kardexMovimientos.usuarioId))
-      .where(and(...condiciones))
-      .orderBy(desc(kardexMovimientos.ts), desc(kardexMovimientos.linea))
+    const filas = await consultaKardexTx(tx, empresaId, filtro)
       .limit(TAMANO_PAGINA_KARDEX + 1)
       .offset((pagina - 1) * TAMANO_PAGINA_KARDEX);
     return { filas: filas.slice(0, TAMANO_PAGINA_KARDEX), pagina, hayMas: filas.length > TAMANO_PAGINA_KARDEX };
+  });
+}
+
+// Los movimientos (sin páginas, hasta el tope, los más recientes
+// primero) para el CSV de /panel/inventario/kardex.
+export async function listarKardexParaExportar(
+  empresaId: string,
+  filtro: { skuId?: string; bodegaId?: string } = {},
+  tope: number = TOPE_EXPORTAR_KARDEX
+): Promise<{ filas: FilaKardex[]; recortado: boolean }> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const filas = await consultaKardexTx(tx, empresaId, filtro).limit(tope + 1);
+    return { filas: filas.slice(0, tope), recortado: filas.length > tope };
   });
 }
 
