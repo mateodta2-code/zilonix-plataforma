@@ -46,6 +46,10 @@ GRANT SELECT, INSERT, UPDATE ON terceros, costos_sku TO app_user;
 -- se borra; corregir es registrar otro con su fecha de corte.
 GRANT SELECT, INSERT ON cuentas_disponible, saldos_disponible TO app_user;
 GRANT UPDATE (activa) ON cuentas_disponible TO app_user;
+-- Issue #422 (por cobrar) — foto de pagos de Mercado Pago sin liberar:
+-- se reemplaza completa en cada sincronización (DELETE + INSERT), nunca
+-- se edita fila por fila.
+GRANT SELECT, INSERT, DELETE ON pagos_mp_por_cobrar TO app_user;
 -- Issue #129 (Z-FIN-07) — ventas: sin DELETE. La cabecera y las
 -- líneas solo se borran en cascada con su pedido. Una corrección no se
 -- edita ni se borra: el único UPDATE permitido es anularla
@@ -340,6 +344,8 @@ ALTER TABLE pedidos_falabella FORCE ROW LEVEL SECURITY;
 -- simple que cuentas_falabella.
 ALTER TABLE cuentas_mp ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_mp FORCE ROW LEVEL SECURITY;
+ALTER TABLE pagos_mp_por_cobrar ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pagos_mp_por_cobrar FORCE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_marketplace ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_marketplace FORCE ROW LEVEL SECURITY;
 ALTER TABLE avisos_ml ENABLE ROW LEVEL SECURITY;
@@ -694,6 +700,10 @@ CREATE POLICY aislamiento_cuentas_falabella ON cuentas_falabella
 
 DROP POLICY IF EXISTS aislamiento_cuentas_mp ON cuentas_mp;
 CREATE POLICY aislamiento_cuentas_mp ON cuentas_mp
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_pagos_mp_por_cobrar ON pagos_mp_por_cobrar;
+CREATE POLICY aislamiento_pagos_mp_por_cobrar ON pagos_mp_por_cobrar
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_pedidos_falabella ON pedidos_falabella;

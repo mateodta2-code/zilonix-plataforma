@@ -34,6 +34,8 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/finanzas/maestra-sku/page.tsx",
   // Issue #422 — cuentas por cobrar: finanzas.consultar (página y consulta).
   "app/panel/finanzas/por-cobrar/page.tsx",
+  // «Actualizar desde Mercado Pago»: finanzas.modificar (acción y consulta).
+  "app/panel/finanzas/por-cobrar/actions.ts",
   // Issue #422 (fase 5) — cuentas por pagar: ver pide finanzas.consultar;
   // marcar pagado, finanzas.modificar (en la acción y otra vez en
   // lib/finanzas/gastos-db.ts / por-pagar-db.ts).

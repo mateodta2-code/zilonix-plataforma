@@ -751,6 +751,13 @@ export const cuentasMp = pgTable(
     // Código corto seguro (mp_sin_config, mp_403, mp_sin_datos...), nunca
     // el body de Mercado Pago.
     ultimoErrorSaldo: text("ultimo_error_saldo"),
+    // Issue #422 (por cobrar) — última foto de pagos sin liberar leída de
+    // /v1/payments/search (tabla pagos_mp_por_cobrar). null = nunca se
+    // sincronizó: /panel/finanzas/por-cobrar sigue con el estimado de
+    // pedidos_finanzas para la cuenta ML con el mismo user_id.
+    porCobrarSincronizadoTs: timestamp("por_cobrar_sincronizado_ts", { withTimezone: true }),
+    // Código corto (mp_401, mp_429...), nunca el body de Mercado Pago.
+    ultimoErrorPorCobrar: text("ultimo_error_por_cobrar"),
   },
   (t) => ({
     // Una cuenta real de Mercado Pago no puede estar conectada a dos
@@ -2978,5 +2985,42 @@ export const saldosDisponible = pgTable(
       foreignColumns: [cuentasDisponible.empresaId, cuentasDisponible.id],
     }).onDelete("cascade"),
     porCuentaFecha: index("saldos_disponible_cuenta_fecha_idx").on(t.empresaId, t.cuentaId, t.fechaCorte),
+  })
+);
+
+// Issue #422 (por cobrar) — foto de los pagos de Mercado Pago que todavía
+// no son plata disponible: aprobados sin liberar ("por_liberar") y en
+// reclamo ("retenido"). Se reemplaza completa en cada «Actualizar desde
+// Mercado Pago» (lib/finanzas/por-cobrar-consulta.ts): la pantalla lee
+// de acá y nunca llama a Mercado Pago al abrirse.
+export const pagosMpPorCobrar = pgTable(
+  "pagos_mp_por_cobrar",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull(),
+    cuentaMpId: uuid("cuenta_mp_id").notNull(),
+    pagoIdExterno: text("pago_id_externo").notNull(),
+    ordenIdExterno: text("orden_id_externo"),
+    // status de Mercado Pago (approved, in_mediation).
+    estado: text("estado").notNull(),
+    // money_release_status (pending, not_released…).
+    estadoLiberacion: text("estado_liberacion"),
+    fechaLiberacion: timestamp("fecha_liberacion", { withTimezone: true }),
+    // net_received_amount; null = Mercado Pago no lo mandó (no se adivina).
+    montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }),
+    moneda: text("moneda").notNull(),
+    tipo: text("tipo").notNull(),
+    sincronizadoTs: timestamp("sincronizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    cuentaDeLaEmpresa: foreignKey({
+      name: "pagos_mp_por_cobrar_cuenta_de_la_empresa",
+      columns: [t.empresaId, t.cuentaMpId],
+      foreignColumns: [cuentasMp.empresaId, cuentasMp.id],
+    }).onDelete("cascade"),
+    pagoUnico: unique("pagos_mp_por_cobrar_pago_unico").on(t.cuentaMpId, t.pagoIdExterno),
+    porCuenta: index("pagos_mp_por_cobrar_empresa_cuenta_idx").on(t.empresaId, t.cuentaMpId),
+    monedaIso: check("pagos_mp_por_cobrar_moneda_iso", sql`${t.moneda} ~ '^[A-Z]{3}$'`),
+    tipoValido: check("pagos_mp_por_cobrar_tipo_valido", sql`${t.tipo} in ('por_liberar', 'retenido')`),
   })
 );
