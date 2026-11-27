@@ -300,10 +300,13 @@ export const GUIA: GrupoGuia[] = [
         pasos: [
           "Tabla maestra de SKU: carga costo, packing, envío de agencia y precio mínimo de cada SKU (a mano o importando).",
           "Proveedores y transportadores: el packing se pone una vez y cada SKU lo toma de su proveedor.",
-          "Ventas y utilidad: la utilidad de cada venta antes de publicidad (recaudo − comisión − flete − costo − packing − envío).",
+          "Ventas y utilidad: la utilidad de cada venta antes de publicidad (recaudo − comisión − flete − costo − packing − envío). Filtra por fechas hasta 3 meses (92 días) de una vez.",
           "Falabella: carga el reporte y concilia cada corte de pago.",
         ],
-        consejos: ["Revisa «SKU sin costo»: sus ventas quedan fuera de la utilidad hasta que tengan costo. Zilonix no inventa ningún número."],
+        consejos: [
+          "Revisa «SKU sin costo»: sus ventas quedan fuera de la utilidad hasta que tengan costo. Zilonix no inventa ningún número.",
+          "Al filtrar meses anteriores salen las ventas que Zilonix ya guardó: las que llegan solas desde que conectaste la cuenta. «Traer ventas de este mes» solo vuelve a leer el mes en curso.",
+        ],
       },
     ],
   },

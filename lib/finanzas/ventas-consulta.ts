@@ -29,7 +29,7 @@ import {
   type ResultadoVenta,
 } from "./utilidad-venta";
 import {
-  RANGO_MAXIMO_DIAS,
+  RANGO_MAXIMO_DIAS_FINANZAS,
   armarVentaEntrada,
   resumirPorCuenta,
   type AvisoArmado,
@@ -82,8 +82,10 @@ function validarFiltro(filtro: FiltroVentasUtilidad): void {
     throw new RangoVentasInvalidoError("El rango de fechas no es válido.");
   }
   if (hastaExclusivo <= desde) throw new RangoVentasInvalidoError("La fecha «hasta» no puede ser anterior a «desde».");
-  if (hastaExclusivo.getTime() - desde.getTime() > RANGO_MAXIMO_DIAS * DIA_MS) {
-    throw new RangoVentasInvalidoError(`El rango puede tener como máximo ${RANGO_MAXIMO_DIAS} días.`);
+  // Tope de seguridad de la consulta: el mayor que pide alguna pantalla
+  // (Finanzas, 3 meses). Cada pantalla valida antes su propio tope.
+  if (hastaExclusivo.getTime() - desde.getTime() > RANGO_MAXIMO_DIAS_FINANZAS * DIA_MS) {
+    throw new RangoVentasInvalidoError(`El rango puede tener como máximo ${RANGO_MAXIMO_DIAS_FINANZAS} días.`);
   }
   if (filtro.costo !== undefined && filtro.costo !== "con" && filtro.costo !== "sin") {
     throw new RangoVentasInvalidoError("Filtro de costo desconocido.");

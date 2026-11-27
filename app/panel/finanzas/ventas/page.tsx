@@ -4,14 +4,15 @@ import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { DetalleDiaCuentaProducto } from "@/components/finanzas/DetalleDiaCuentaProducto";
+import { RANGO_MAXIMO_DIAS_FINANZAS } from "@/lib/finanzas/ventas-pantalla";
 import { PanelRecalculoCostos } from "@/components/finanzas/PanelRecalculoCostos";
 import { UtilidadFalabella } from "@/components/finanzas/UtilidadFalabella";
 import { Pestanas } from "@/components/marco/Pestanas";
 import styles from "../finanzas.module.css";
 
 // Issue #131 (Z-FIN-09, Parte A) — ventas y utilidad. Filtros por
-// cuenta, rango de días de Bogotá (máximo 31, por defecto el mes en
-// curso) y con/sin costo. Sin ícono de quitar y sin lápiz: la corrección
+// cuenta, rango de días de Bogotá (máximo 92 = 3 meses desde el 27-nov,
+// antes 31; por defecto el mes en curso) y con/sin costo. Sin ícono de quitar y sin lápiz: la corrección
 // manual es la Parte B. La tabla vive en
 // components/finanzas/DetalleDiaCuentaProducto.tsx, la misma que pinta
 // /panel/pedidos.
@@ -87,6 +88,7 @@ export default async function VentasUtilidadPage({ searchParams }: { searchParam
             ruta={ruta}
             extra={extra}
             acciones={puedeRecalcular ? <PanelRecalculoCostos /> : undefined}
+            rangoMaximoDias={RANGO_MAXIMO_DIAS_FINANZAS}
           />
         </section>
       )}
