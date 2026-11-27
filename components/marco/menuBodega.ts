@@ -14,6 +14,7 @@ export function gruposBodega(rol: RolBodega): GrupoNav[] {
         { etiqueta: "Inventario", href: "/bodega/inventario", icono: "inventario" },
         { etiqueta: "Despachos", href: "/bodega/despachos", icono: "despachos" },
         { etiqueta: "Domiciliarios", href: "/bodega/domiciliarios", icono: "personas" },
+        { etiqueta: "Sedes", href: "/bodega/sedes", icono: "configuracion" },
       ],
     },
   ];

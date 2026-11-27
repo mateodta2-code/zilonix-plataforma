@@ -9,7 +9,7 @@ import { accesoBodega } from "@/lib/bodega/contexto";
 // acción vuelve a llamar accesoBodega().
 export default async function BodegaLayout({ children }: { children: ReactNode }) {
   const { usuario, clerkUser, decision } = await accesoBodega("bodega");
-  if (!decision.ok) return <SinAccesoBodega motivo={decision.motivo} />;
+  if (!decision.ok) return <SinAccesoBodega motivo={decision.motivo} panel="bodega" />;
 
   return (
     <MarcoApp
