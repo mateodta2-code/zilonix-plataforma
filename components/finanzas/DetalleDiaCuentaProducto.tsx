@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { acotarPagina, normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
+import { normalizarParametro } from "@/lib/filtros-listado";
 import { listarCuentasMlParaSelector, PARAM_CUENTA, resolverCuentaMl } from "@/lib/ml/selector-cuenta";
 import { mostrarMonto } from "@/lib/finanzas/montos";
 import { listarVentasUtilidad, RangoVentasInvalidoError, type ResultadoVentasUtilidad } from "@/lib/finanzas/ventas-consulta";
-import { hrefVentasUtilidad, porcentajeVentasConCosto, resolverRangoVentas, type FiltrosUrlVentas } from "@/lib/finanzas/ventas-pantalla";
+import { porcentajeVentasConCosto, resolverRangoVentas, type FiltrosUrlVentas } from "@/lib/finanzas/ventas-pantalla";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -32,10 +32,6 @@ import estilos from "./ventasUtilidad.module.css";
 // La tabla día → cuenta → producto es un acordeón cliente
 // (TablaDetalleAcordeon.tsx): acá se calcula todo y allá solo vive qué
 // día y qué cuenta están abiertos.
-
-// Días por página del detalle. Los totales de arriba son siempre de todo
-// el rango.
-const DIAS_POR_PAGINA = 7;
 
 // 27-nov (tabla más clara): nombres completos, el mismo en las dos tablas,
 // y al pasar el mouse qué es cada número (AYUDA_COLUMNAS). Sin «Dev.»:
@@ -146,13 +142,14 @@ export async function DetalleDiaCuentaProducto({
 
   const total = datos?.detalle.total;
   const dias = datos?.detalle.dias ?? [];
-  const totalPaginas = Math.ceil(dias.length / DIAS_POR_PAGINA);
-  const pagina = acotarPagina(parsearPagina(normalizarParametro(searchParams.pagina)), totalPaginas);
-  const diasPagina = dias.slice((pagina - 1) * DIAS_POR_PAGINA, pagina * DIAS_POR_PAGINA);
+  // 27-nov: sin páginas de 7 días. Salen todos los días del rango en una
+  // caja con barra para bajar (<Tabla scroll>, encabezado fijo); los días
+  // arrancan cerrados salvo el más nuevo, así que el alto lo da el
+  // número de días, no el de ventas.
   const conDevolucion = new Set(datos?.conDevolucion ?? []);
-  // Al acordeón (cliente) solo viajan los pedidos de la página.
-  const idsPagina = new Set(diasPagina.flatMap((d) => d.cuentas.flatMap((c) => c.productos.map((p) => p.pedido_id))));
-  const pedidoIdExternoPagina = Object.fromEntries([...idsPagina].map((id) => [id, datos?.pedidoIdExterno[id] ?? ""]));
+  // Al acordeón (cliente) solo viajan los pedidos del rango.
+  const idsRango = new Set(dias.flatMap((d) => d.cuentas.flatMap((c) => c.productos.map((p) => p.pedido_id))));
+  const pedidoIdExternoRango = Object.fromEntries([...idsRango].map((id) => [id, datos?.pedidoIdExterno[id] ?? ""]));
   // Ventas cuya comisión no vino de Mercado Libre (ni marketplace_fee ni
   // sale_fee): suman $0 en la columna Comisión, y eso no puede pasar
   // callado (#131).
@@ -280,36 +277,20 @@ export async function DetalleDiaCuentaProducto({
                   </p>
                 )}
                 <div className={estilos.tablaCompacta}>
-                  {/* La key cambia con la página y los filtros: el acordeón
-                      vuelve a abrir solo el día más nuevo de la página. */}
+                  {/* La key cambia con los filtros: el acordeón vuelve a
+                      abrir solo el día más nuevo del rango. */}
                   <TablaDetalleAcordeon
-                    key={`${pagina}|${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}`}
+                    key={`${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}`}
                     encabezados={COLUMNAS_DETALLE}
                     grupos={GRUPOS_DETALLE}
-                    dias={diasPagina}
-                    pedidoIdExterno={pedidoIdExternoPagina}
-                    conDevolucion={[...conDevolucion].filter((id) => idsPagina.has(id))}
+                    dias={dias}
+                    pedidoIdExterno={pedidoIdExternoRango}
+                    conDevolucion={[...conDevolucion].filter((id) => idsRango.has(id))}
                   />
                 </div>
-                {totalPaginas > 1 && (
-                  <div className={estilos.paginacion}>
-                    <span className={estilos.suave}>
-                      Página {pagina} de {totalPaginas} · {dias.length} días con ventas
-                    </span>
-                    <div className={estilos.accionesFiltro}>
-                      {pagina > 1 && (
-                        <BotonLink href={hrefVentasUtilidad(ruta, extra, filtros, pagina - 1)} variante="fantasma">
-                          Días más nuevos
-                        </BotonLink>
-                      )}
-                      {pagina < totalPaginas && (
-                        <BotonLink href={hrefVentasUtilidad(ruta, extra, filtros, pagina + 1)} variante="fantasma">
-                          Días más viejos
-                        </BotonLink>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <p className={estilos.suave}>
+                  {dias.length} {dias.length === 1 ? "día" : "días"} con ventas en el rango
+                </p>
               </section>
             </>
           )}

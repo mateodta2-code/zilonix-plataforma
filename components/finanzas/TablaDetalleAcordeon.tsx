@@ -122,9 +122,10 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                               className={estilos.lineaProducto}
                               title={`${p.titulo} · ${p.sku_codigo ?? "sin SKU"} · ${ETIQUETA_FORMA[p.forma_entrega]} · #${pedidoIdExterno[p.pedido_id]}`}
                             >
-                              <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.enlace} ${estilos.tituloProducto}`}>
-                                {p.titulo}
-                              </Link>
+                              {/* 27-nov: el título es texto normal (se puede seleccionar y
+                                  copiar); el detalle de la venta se abre desde el número
+                                  de pedido. */}
+                              <span className={estilos.tituloProducto}>{p.titulo}</span>
                               <div className={estilos.filaDatosProducto}>
                                 <Chip>{ETIQUETA_FORMA[p.forma_entrega]}</Chip>
                                 {devoluciones.has(p.pedido_id) && (
@@ -133,7 +134,9 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                                   </Chip>
                                 )}
                                 <span className={estilos.datoProducto}>[{p.sku_codigo ? <SkuCopiable sku={p.sku_codigo} comoSpan /> : "sin SKU"}]</span>
-                                <span className={estilos.datoProducto}>#{pedidoIdExterno[p.pedido_id]}</span>
+                                <Link href={`/panel/finanzas/ventas/${p.pedido_id}`} className={`${estilos.datoProducto} ${estilos.enlacePedido}`} title="Ver el detalle de esta venta">
+                                  #{pedidoIdExterno[p.pedido_id]}
+                                </Link>
                               </div>
                             </div>
                           </CeldaTabla>
