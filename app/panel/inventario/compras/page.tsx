@@ -45,7 +45,7 @@ export default async function ComprasPage({ searchParams }: { searchParams: Reco
 
   return (
     <>
-      <EncabezadoPagina titulo="Órdenes de compra" descripcion="Lo que le pediste a un proveedor. Al recibir, el stock sube y la orden se cierra sola." />
+      <EncabezadoPagina titulo="Registro de compras" descripcion="Lo que le pediste a un proveedor. Al recibir, el stock sube y la orden se cierra sola." />
       <AvisosUrl searchParams={searchParams} />
 
       {puedeCrear && lista.length > 0 && skusSimples.length > 0 && (

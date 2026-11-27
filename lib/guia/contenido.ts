@@ -145,16 +145,17 @@ export const GUIA: GrupoGuia[] = [
     secciones: [
       {
         id: "productos",
-        titulo: "Productos (SKU, inventario, bodegas)",
+        titulo: "Productos (SKU, inventario, compras)",
         ruta: "/panel/inventario",
         otrasRutas: ["/panel/sku", "/panel/bodegas"],
         paraQue: "Llevar tu catálogo y tu stock: qué tienes, dónde está y cuánto se publica en Mercado Libre.",
         pasos: [
           "SKU: crea tus productos (uno por uno o importando un CSV) y vincula cada publicación de Mercado Libre con su SKU.",
-          "Bodegas: registra dónde guardas la mercancía. La principal es la primera que se usa para reservar pedidos.",
+          "Bodegas: registra dónde guardas la mercancía (si todavía no tienes ninguna, Inventario te muestra el enlace «Ir a Bodegas»). La principal es la primera que se usa para reservar pedidos.",
           "Inventario: ve el stock por bodega y haz ajustes o traslados. «Para ML» es lo que se publica.",
-          "Ingresos y Compras: registra la mercancía que llega o lo que le pediste a un proveedor; al recibir, el stock sube solo.",
-          "Kardex: el historial de cada movimiento, con quién lo hizo. No se edita ni se borra.",
+          "Registro de compras: registra lo que le pediste a un proveedor; al recibir, el stock sube solo.",
+          "Trazabilidad de inventario: el historial de cada movimiento, con quién lo hizo. No se edita ni se borra.",
+          "Devoluciones, Inventario Full y Proyección de inventarios: en construcción.",
         ],
         consejos: ["Revisa «Publicaciones sin SKU»: una venta sin SKU no descuenta stock ni entra a la utilidad."],
       },

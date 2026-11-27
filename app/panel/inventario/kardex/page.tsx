@@ -60,7 +60,7 @@ export default async function KardexPage({ searchParams }: { searchParams: Recor
 
   return (
     <>
-      <EncabezadoPagina titulo="Kardex" descripcion="Cada movimiento de stock, con quién lo hizo y el saldo que dejó. No se edita ni se borra." />
+      <EncabezadoPagina titulo="Trazabilidad de inventario" descripcion="Cada movimiento de stock, con quién lo hizo y el saldo que dejó. No se edita ni se borra." />
 
       <form method="get" className={styles.filtros}>
         <Campo etiqueta="SKU">
