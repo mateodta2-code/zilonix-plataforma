@@ -41,6 +41,7 @@ export const PERMISOS_BODEGA: { capacidad: string; roles: readonly RolBodega[] }
   { capacidad: "Ver, desactivar y reactivar personas", roles: ["admin_bodega"] },
   { capacidad: "Cambiar el rol de una persona", roles: ["admin_bodega"] },
   { capacidad: "Editar el nombre y el NIT de la bodega", roles: ["admin_bodega"] },
+  { capacidad: "Administrar sedes", roles: ["admin_bodega"] },
 ];
 
 export type EstadoInvitacionBodega = "valida" | "vencida" | "usada";
