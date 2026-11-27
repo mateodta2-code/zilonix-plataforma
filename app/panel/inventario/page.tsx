@@ -168,7 +168,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
         <EstadoVacio>{q ? "Ningún SKU coincide con esa búsqueda." : "Todavía no hay SKU. Créalos en la pantalla de SKU."}</EstadoVacio>
       ) : (
         <>
-          <Tabla encabezados={["SKU", ...columnas.map((b) => b.nombre), "Reservado", "Para ML", "Días de stock", "Kardex"]}>
+          <Tabla encabezados={["SKU", ...columnas.map((b) => b.nombre), "Reservado", "Para ML", "Días de stock", "Trazabilidad"]}>
             {resultado.filas.map((f) => (
               <FilaTabla key={f.skuId}>
                 <CeldaTabla>

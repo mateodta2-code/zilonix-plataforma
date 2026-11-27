@@ -9,12 +9,19 @@ import type { SubitemNav } from "@/components/marco/tipos";
 // Todas piden ("inventario","consultar"), el mismo permiso con el que
 // se ve el ítem (app/panel/layout.tsx). Una sección nueva con otro
 // permiso tiene que filtrarse en el layout antes de mostrarse.
+//
+// Orden y nombres pedidos para el módulo (issue #280): Bodegas, Ingresos
+// y Configuración salieron del menú pero sus pantallas siguen abriendo
+// por URL (y desde los enlaces que ya las llaman). Compras y Kardex solo
+// cambiaron de nombre: las rutas quedan igual para no romper enlaces
+// (la tabla de Inventario lleva a /panel/inventario/kardex?sku=…).
+// Devoluciones, Inventario Full y Proyección están en construcción.
 export const SECCIONES_PRODUCTOS: SubitemNav[] = [
+  { etiqueta: "Registro de compras", href: "/panel/inventario/compras" },
   { etiqueta: "Inventario", href: "/panel/inventario" },
+  { etiqueta: "Trazabilidad de inventario", href: "/panel/inventario/kardex" },
+  { etiqueta: "Devoluciones", href: "/panel/inventario/devoluciones" },
+  { etiqueta: "Inventario Full", href: "/panel/inventario/full" },
+  { etiqueta: "Proyección de inventarios", href: "/panel/inventario/proyeccion" },
   { etiqueta: "SKU", href: "/panel/sku" },
-  { etiqueta: "Bodegas", href: "/panel/bodegas" },
-  { etiqueta: "Kardex", href: "/panel/inventario/kardex" },
-  { etiqueta: "Ingresos", href: "/panel/inventario/ingresos" },
-  { etiqueta: "Compras", href: "/panel/inventario/compras" },
-  { etiqueta: "Configuración", href: "/panel/inventario/configuracion" },
 ];
