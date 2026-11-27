@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { DiaDetalle } from "@/lib/finanzas/detalle-ventas";
 import { Chip } from "@/components/marco/Chip";
 import { IconoChevron } from "@/components/marco/iconos";
-import { CeldaTabla, Tabla, type EncabezadoTabla } from "@/components/marco/Tabla";
+import { CeldaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { CeldasMontos } from "./CeldasMontos";
 import { ETIQUETA_FORMA, fechaDiaLegible } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
@@ -21,6 +21,8 @@ import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 type Props = {
   encabezados: readonly (string | EncabezadoTabla)[];
+  // Fila de grupos encima de los encabezados (vendiste/descuenta/ganaste).
+  grupos?: readonly GrupoEncabezado[];
   dias: DiaDetalle[];
   // pedido_id → número de orden de ML, solo de los pedidos de la página.
   pedidoIdExterno: Record<string, string>;
@@ -36,7 +38,7 @@ function plural(n: number, uno: string, varios: string): string {
   return n === 1 ? uno : varios;
 }
 
-export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDevolucion }: Props) {
+export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExterno, conDevolucion }: Props) {
   const [diasAbiertos, setDiasAbiertos] = useState<Set<string>>(() => {
     const nuevo = diaMasNuevo(dias);
     return new Set(nuevo === null ? [] : [nuevo]);
@@ -53,7 +55,8 @@ export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDe
   }
 
   return (
-    <Tabla encabezados={encabezados}>
+    // scroll: el encabezado queda fijo arriba de la caja al bajar (27-nov).
+    <Tabla encabezados={encabezados} grupos={grupos} scroll>
       {dias.map((dia) => {
         const diaAbierto = diasAbiertos.has(dia.dia);
         const textoDia = `${fechaDiaLegible(dia.dia)} · ${dia.numero_cuentas} ${plural(dia.numero_cuentas, "cuenta", "cuentas")} · ${dia.numero_ventas} ${plural(dia.numero_ventas, "venta", "ventas")}`;
@@ -70,7 +73,12 @@ export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDe
                 >
                   <IconoChevron size={12} className={estilos.chevron} />
                   {/* 27-nov: fecha legible y palabras completas («Jue 27 nov 2026 · 2 cuentas · 12 ventas»). */}
-                  <span className={estilos.textoNivel}>{textoDia}</span>
+                  <span className={estilos.textoNivel}>
+                    <span className={estilos.fechaDia}>{fechaDiaLegible(dia.dia)}</span>
+                    <span className={estilos.conteoNivel}>
+                      {dia.numero_cuentas} {plural(dia.numero_cuentas, "cuenta", "cuentas")} · {dia.numero_ventas} {plural(dia.numero_ventas, "venta", "ventas")}
+                    </span>
+                  </span>
                 </button>
               </CeldaTabla>
               <CeldasMontos t={dia.totales} costo={dia.totales.costo_producto} utilidad={dia.totales.utilidad} />
@@ -92,7 +100,11 @@ export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDe
                         >
                           <IconoChevron size={12} className={estilos.chevron} />
                           <span className={estilos.textoNivel}>
-                            {cuenta.nickname} · {cuenta.numero_ventas} {plural(cuenta.numero_ventas, "venta", "ventas")}
+                            <span className={estilos.puntoCuenta} aria-hidden="true" />
+                            {cuenta.nickname}
+                            <span className={estilos.conteoNivel}>
+                              {cuenta.numero_ventas} {plural(cuenta.numero_ventas, "venta", "ventas")}
+                            </span>
                           </span>
                         </button>
                       </CeldaTabla>
@@ -100,7 +112,7 @@ export function TablaDetalleAcordeon({ encabezados, dias, pedidoIdExterno, conDe
                     </tr>
                     {cuentaAbierta &&
                       cuenta.productos.map((p) => (
-                        <tr key={`${p.pedido_id}-${p.linea}`} className={estilos.filaProducto}>
+                        <tr key={`${p.pedido_id}-${p.linea}`} className={p.costo_producto === null ? `${estilos.filaProducto} ${estilos.filaSinCosto}` : estilos.filaProducto}>
                           <CeldaTabla className={estilos.sangriaProducto}>
                             {/* Bloque de ancho fijo, como Zilonix OS: el título entero
                                 en hasta 2 líneas (27-nov; antes 1 línea con «…») y debajo

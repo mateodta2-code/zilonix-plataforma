@@ -7,7 +7,7 @@ import { hrefVentasUtilidad, porcentajeVentasConCosto, resolverRangoVentas, type
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla } from "@/components/marco/Tabla";
+import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
@@ -43,9 +43,13 @@ const DIAS_POR_PAGINA = 7;
 // Antes: Nº ventas, Dev., % util, % ML, Cnt.
 const NOMBRES_COLUMNAS = ["Ventas", "Recaudo", "Comisión ML", "Flete ML", "Costo", "Packing", "Envío", "Utilidad", "Margen", "% comisión", "Unidades"];
 
+// Utilidad y Margen van en la franja de «Lo que ganaste».
+const COLUMNAS_RESULTADO = new Set(["Utilidad", "Margen"]);
+
 function encabezado(nombre: string): EncabezadoTabla {
   return {
     clave: nombre,
+    className: COLUMNAS_RESULTADO.has(nombre) ? estilos.resultado : undefined,
     contenido: (
       <span className={estilos.encabezadoAyuda} title={AYUDA_COLUMNAS[nombre]}>
         {nombre}
@@ -56,6 +60,20 @@ function encabezado(nombre: string): EncabezadoTabla {
 
 const COLUMNAS_DETALLE: EncabezadoTabla[] = [{ clave: "nivel", contenido: "Día · cuenta · producto" }, ...NOMBRES_COLUMNAS.map(encabezado)];
 const COLUMNAS_TOTAL_CUENTA: EncabezadoTabla[] = [{ clave: "cuenta", contenido: "Cuenta" }, ...NOMBRES_COLUMNAS.map(encabezado), encabezado("% con costo")];
+
+// La tabla se lee como la fórmula: lo que vendiste, lo que se descuenta
+// y lo que ganaste (mismo orden que NOMBRES_COLUMNAS).
+function gruposColumnas(columnasDatos: number): GrupoEncabezado[] {
+  return [
+    { clave: "nivel", etiqueta: "", columnas: 1, className: estilos.grupoVacio },
+    { clave: "vendiste", etiqueta: "Lo que vendiste", columnas: 2, className: estilos.grupo },
+    { clave: "descuenta", etiqueta: "Lo que se descuenta", columnas: 5, className: estilos.grupo },
+    { clave: "ganaste", etiqueta: "Lo que ganaste", columnas: 2, className: `${estilos.grupo} ${estilos.grupoResultado}` },
+    { clave: "datos", etiqueta: "Datos", columnas: columnasDatos, className: estilos.grupo },
+  ];
+}
+const GRUPOS_DETALLE = gruposColumnas(2);
+const GRUPOS_TOTAL_CUENTA = gruposColumnas(3);
 
 type Props = {
   empresaId: string;
@@ -232,7 +250,7 @@ export async function DetalleDiaCuentaProducto({
               {mostrarResumen && (
                 <section className={estilos.seccion}>
                   <h2 className={estilos.tituloSeccion}>Total por cuenta, antes de publicidad</h2>
-                  <Tabla encabezados={COLUMNAS_TOTAL_CUENTA}>
+                  <Tabla encabezados={COLUMNAS_TOTAL_CUENTA} grupos={GRUPOS_TOTAL_CUENTA}>
                     {datos.resumenCuentas.map((c) => (
                       <FilaTabla key={c.cuenta_ml_id}>
                         <CeldaTabla>
@@ -249,8 +267,11 @@ export async function DetalleDiaCuentaProducto({
               <section className={estilos.seccion}>
                 <h2 className={estilos.tituloSeccion}>Detalle día a día · cuenta · producto</h2>
                 <p className={estilos.formula}>
-                  <strong>Utilidad</strong> = Recaudo − Comisión ML − Flete ML − Costo − Packing − Envío (antes de publicidad). Pasa el mouse por cada
-                  columna para ver qué es.
+                  <span>
+                    <strong>Utilidad</strong> = Recaudo
+                  </span>
+                  <span>− Comisión ML − Flete ML − Costo − Packing − Envío</span>
+                  <span className={estilos.formulaNota}>Antes de publicidad · pasa el mouse por cada columna para ver qué es</span>
                 </p>
                 {ventasSinComision > 0 && (
                   <p className={estilos.suave}>
@@ -264,6 +285,7 @@ export async function DetalleDiaCuentaProducto({
                   <TablaDetalleAcordeon
                     key={`${pagina}|${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}`}
                     encabezados={COLUMNAS_DETALLE}
+                    grupos={GRUPOS_DETALLE}
                     dias={diasPagina}
                     pedidoIdExterno={pedidoIdExternoPagina}
                     conDevolucion={[...conDevolucion].filter((id) => idsPagina.has(id))}

@@ -11,6 +11,18 @@ export type EncabezadoTabla = {
   fija?: boolean;
   // Alinea el título a la derecha, encima de celdas `numerica`.
   numerica?: boolean;
+  // Clase extra del <th> (p. ej. resaltar una columna).
+  className?: string;
+};
+
+// Fila opcional de grupos encima de los encabezados (27-nov, detalle de
+// Ventas y utilidad): cada grupo abarca `columnas` columnas seguidas.
+// Etiqueta vacía = hueco sin título.
+export type GrupoEncabezado = {
+  clave: string;
+  etiqueta: string;
+  columnas: number;
+  className?: string;
 };
 
 // Tabla real (no la lista "celular primero" de ListaFilas) — para
@@ -26,15 +38,26 @@ export function Tabla({
   encabezados,
   children,
   scroll,
+  grupos,
 }: {
   encabezados: readonly (string | EncabezadoTabla)[];
   children: ReactNode;
   scroll?: boolean;
+  grupos?: readonly GrupoEncabezado[];
 }) {
   return (
     <div className={scroll ? `${styles.envoltura} ${styles.scroll}` : styles.envoltura}>
       <table className={styles.tabla}>
         <thead>
+          {grupos && grupos.length > 0 && (
+            <tr>
+              {grupos.map((g) => (
+                <th key={g.clave} colSpan={g.columnas} className={[`zx-etiqueta ${styles.th}`, g.className ?? ""].filter(Boolean).join(" ")}>
+                  {g.etiqueta}
+                </th>
+              ))}
+            </tr>
+          )}
           <tr>
             {encabezados.map((encabezado, indice) => {
               if (typeof encabezado === "string") {
@@ -47,7 +70,7 @@ export function Tabla({
               return (
                 <th
                   key={encabezado.clave}
-                  className={[`zx-etiqueta ${styles.th}`, encabezado.fija ? styles.thFija : "", encabezado.numerica ? styles.numerica : ""]
+                  className={[`zx-etiqueta ${styles.th}`, encabezado.fija ? styles.thFija : "", encabezado.numerica ? styles.numerica : "", encabezado.className ?? ""]
                     .filter(Boolean)
                     .join(" ")}
                   aria-sort={encabezado.ariaSort}

@@ -15,10 +15,16 @@ import estilos from "./ventasUtilidad.module.css";
 // 27-nov (tabla más clara): sin la columna «Dev.» (siempre salía «—»;
 // vuelve con #164), utilidad y margen en verde o rojo, y en una venta
 // sin costo, «Cargar costo» lleva a la Tabla maestra con su SKU.
-function claseSigno(valor: string | null): string {
-  if (valor === null || /^-?0*(\.0*)?$/.test(valor)) return estilos.numero;
-  return `${estilos.numero} ${valor.startsWith("-") ? estilos.negativo : estilos.positivo}`;
+// Diseño (27-nov): lo que se descuenta va en gris con «−» (estilos.menos)
+// y Utilidad + Margen en la franja de «Lo que ganaste» (estilos.resultado),
+// con el margen en una pastilla verde o roja.
+type Signo = "positivo" | "negativo" | "cero";
+function signo(valor: string | null): Signo {
+  if (valor === null || /^-?0*(\.0*)?$/.test(valor)) return "cero";
+  return valor.startsWith("-") ? "negativo" : "positivo";
 }
+const RESULTADO = `${estilos.numero} ${estilos.resultado}`;
+const MENOS = `${estilos.numero} ${estilos.menos}`;
 
 export function CeldasMontos({
   t,
@@ -36,9 +42,9 @@ export function CeldasMontos({
     <>
       <CeldaTabla className={estilos.numero}>{t.ventas}</CeldaTabla>
       <CeldaTabla className={estilos.numero}>{mostrarMonto(t.recaudo)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.comision_ml)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.flete_ml)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>
+      <CeldaTabla className={MENOS}>{mostrarMonto(t.comision_ml)}</CeldaTabla>
+      <CeldaTabla className={MENOS}>{mostrarMonto(t.flete_ml)}</CeldaTabla>
+      <CeldaTabla className={costo === null ? estilos.numero : MENOS}>
         {costo === null ? (
           <Chip estado="aviso" title="Esta venta no tiene costo en la Tabla maestra: queda fuera de la utilidad.">
             falta costo
@@ -47,21 +53,25 @@ export function CeldasMontos({
           mostrarMonto(costo)
         )}
       </CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.empaque)}</CeldaTabla>
-      <CeldaTabla className={estilos.numero}>{mostrarMonto(t.envio)}</CeldaTabla>
-      <CeldaTabla className={claseSigno(utilidad)}>
+      <CeldaTabla className={MENOS}>{mostrarMonto(t.empaque)}</CeldaTabla>
+      <CeldaTabla className={MENOS}>{mostrarMonto(t.envio)}</CeldaTabla>
+      <CeldaTabla className={`${RESULTADO} ${estilos[signo(utilidad)]}`}>
         {utilidad !== null ? (
           mostrarMonto(utilidad)
         ) : sku ? (
-          <Link href={`/panel/finanzas/maestra-sku/editar?sku=${encodeURIComponent(sku)}`} className={estilos.enlace} title="Carga el costo de este SKU en la Tabla maestra">
+          <Link href={`/panel/finanzas/maestra-sku/editar?sku=${encodeURIComponent(sku)}`} className={estilos.botonCosto} title="Carga el costo de este SKU en la Tabla maestra">
             Cargar costo
           </Link>
         ) : (
           "—"
         )}
       </CeldaTabla>
-      <CeldaTabla className={claseSigno(utilidad === null ? null : t.porcentaje_utilidad)}>
-        {utilidad === null ? "—" : mostrarPorcentajeEntero(t.porcentaje_utilidad)}
+      <CeldaTabla className={RESULTADO}>
+        {utilidad === null || t.porcentaje_utilidad === null ? (
+          <span className={estilos.suaveCelda}>—</span>
+        ) : (
+          <span className={`${estilos.pastilla} ${estilos[`pastilla_${signo(t.porcentaje_utilidad)}`]}`}>{mostrarPorcentajeEntero(t.porcentaje_utilidad)}</span>
+        )}
       </CeldaTabla>
       <CeldaTabla className={estilos.numero}>{mostrarPorcentajeEntero(t.porcentaje_ml)}</CeldaTabla>
       <CeldaTabla className={estilos.numero}>{t.cantidad}</CeldaTabla>

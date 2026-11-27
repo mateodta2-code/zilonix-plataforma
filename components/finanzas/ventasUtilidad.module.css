@@ -591,3 +591,171 @@
   color: var(--texto-suave);
   font-size: 13px;
 }
+
+/* ---------------------------------------------------------------------
+   27-nov — diseño visual del detalle (vista previa aprobada por el
+   usuario): grupos de columnas, descuentos en gris con «−», franja de
+   «Lo que ganaste», jerarquía de filas, ventas sin costo marcadas y
+   primera columna fija. Solo tokens existentes de globals.css: el aviso
+   usa el mismo tono que el chip «aviso» (acento), no un color nuevo.
+   --------------------------------------------------------------------- */
+
+/* Fila de grupos encima de los encabezados. */
+/* Solo la fila de nombres queda fija al bajar; la de grupos se va con
+   la tabla (si las dos fueran sticky a top: 0, se taparían). */
+.tablaCompacta th.grupo,
+.tablaCompacta th.grupoVacio {
+  position: static;
+  padding: 8px 6px 0;
+  text-align: center !important;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--plata-medio);
+  border-bottom: 0;
+}
+
+.tablaCompacta th.grupo {
+  box-shadow: inset 0 -2px 0 var(--borde);
+  padding-bottom: 4px;
+}
+
+.tablaCompacta th.grupoResultado {
+  color: var(--acento-fuerte);
+  box-shadow: inset 0 -2px 0 var(--acento);
+}
+
+/* Lo que se descuenta: gris y con «−». */
+.menos {
+  color: var(--texto-suave);
+}
+
+.menos::before {
+  content: "−";
+  margin-right: 2px;
+  color: var(--plata-oscuro);
+}
+
+/* Franja de «Lo que ganaste» (Utilidad y Margen). En el encabezado
+   fijo va encima de su fondo opaco, para que no se vea la tabla por
+   debajo al bajar. */
+.tablaCompacta td.resultado {
+  background-color: var(--acento-suave);
+}
+
+.tablaCompacta th.resultado {
+  background: linear-gradient(var(--acento-suave), var(--acento-suave)), var(--tabla-encabezado-fondo);
+}
+
+.tablaCompacta td.resultado {
+  font-weight: 700;
+}
+
+.cero {
+  color: inherit;
+}
+
+.suaveCelda {
+  color: var(--plata-oscuro);
+}
+
+.pastilla {
+  display: inline-block;
+  min-width: 42px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.pastilla_positivo {
+  color: var(--exito-texto);
+  background: color-mix(in srgb, var(--exito-texto) 15%, transparent);
+}
+
+.pastilla_negativo {
+  color: var(--peligro-texto);
+  background: color-mix(in srgb, var(--peligro-texto) 15%, transparent);
+}
+
+.pastilla_cero {
+  color: var(--texto-suave);
+  background: var(--tabla-encabezado-fondo);
+}
+
+/* Día: barra de acento a la izquierda, fecha más grande y conteo suave. */
+.tablaCompacta .filaDia td:first-child {
+  box-shadow: inset 3px 0 0 var(--acento);
+}
+
+.tablaCompacta .filaDia td {
+  padding-block: 8px;
+}
+
+.fechaDia {
+  font-size: 13px;
+}
+
+.conteoNivel {
+  margin-left: 8px;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--texto-suave);
+}
+
+/* Cuenta: punto azul metal antes del nombre. */
+.puntoCuenta {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--gradiente-azul-metal);
+  vertical-align: middle;
+}
+
+/* Producto: más aire. */
+.tablaCompacta .filaProducto td {
+  padding-block: 7px;
+}
+
+/* Venta sin costo: barra de aviso a la izquierda y «Cargar costo» como
+   botón chico. */
+.tablaCompacta .filaSinCosto td:first-child {
+  box-shadow: inset 3px 0 0 var(--acento);
+}
+
+.botonCosto {
+  display: inline-block;
+  padding: 2px 9px;
+  border: 1px solid var(--acento);
+  border-radius: 8px;
+  color: var(--acento-fuerte);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.botonCosto:hover,
+.botonCosto:focus-visible {
+  background: var(--acento-suave);
+  outline: none;
+}
+
+/* Primera columna fija al moverse de costado (con fondo propio para
+   que los números no se vean por debajo). El encabezado ya queda fijo
+   arriba con <Tabla scroll>. */
+.tablaCompacta td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--tabla-fondo);
+}
+
+.tablaCompacta .filaDia td:first-child {
+  background: var(--tabla-encabezado-fondo);
+}
+
+.tablaCompacta .filaProducto:hover td:first-child {
+  background: linear-gradient(var(--fila-hover), var(--fila-hover)), var(--tabla-fondo);
+}
