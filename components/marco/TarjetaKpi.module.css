@@ -86,11 +86,25 @@
   font-family: var(--fuente-titulos);
   /* Manual de marca: ExtraBold (800) para cifras grandes. */
   font-weight: 800;
-  /* Issue #525: las cifras largas («COP 16.059.595») se partían en dos líneas. */
+  /* Issue #525: las cifras largas («COP 16.059.595») se partían en dos líneas.
+     27-nov: y en tarjetas angostas se cortaban («$ 27.466.7…», con rangos
+     de hasta 1 año en Ventas y utilidad). El tamaño sale del ancho de la
+     tarjeta (cqi de .cajaValor): ~13 caracteres caben enteros; nunca
+     menos de 15px ni más de 28px. Sin soporte de cqi queda el de antes. */
   font-size: clamp(20px, 1.6vw + 8px, 28px);
+  font-size: clamp(15px, 11.5cqi, 28px);
   line-height: 1.15;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* Contenedor que da el ancho de la tarjeta a la cifra (container
+   query). Ocupa todo el ancho: la tarjeta vive en rejillas de columnas
+   fijas, así que su ancho nunca depende de la cifra. */
+.cajaValor {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
 }
 
 .detalle {

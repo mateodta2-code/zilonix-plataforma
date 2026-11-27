@@ -216,11 +216,12 @@ export function resumirPorCuenta(detalle: DetalleVentas): ResumenCuenta[] {
 // ---------------------------------------------------------------------------
 
 export const RANGO_MAXIMO_DIAS = 31;
-// Finanzas → Ventas y utilidad (pedido del 27-nov): hasta 3 meses para
-// comparar trimestres. 92 = el trimestre más largo (jul–sep, oct–dic).
+// Finanzas → Ventas y utilidad (pedido del 27-nov): hasta 1 año de una
+// vez (primero se pidió 3 meses = 92 días). 366 para que quepa un año
+// bisiesto completo.
 // Pedidos e indicadores siguen con 31: no se pidió allá y Pedidos pinta
 // cada venta.
-export const RANGO_MAXIMO_DIAS_FINANZAS = 92;
+export const RANGO_MAXIMO_DIAS_FINANZAS = 366;
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 export type RangoVentas = {
