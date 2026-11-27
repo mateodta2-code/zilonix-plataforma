@@ -144,7 +144,7 @@ export default async function PorPagarPage({ searchParams }: { searchParams: Rec
         <h2 className={styles.tituloSeccion}>Partidas pendientes</h2>
         {filas.length === 0 ? (
           <EstadoVacio>
-            No hay nada por pagar{hayFiltros ? " con estos filtros" : ""}. Los gastos se registran en Gastos; las órdenes de compra, en Productos → Compras.
+            No hay nada por pagar{hayFiltros ? " con estos filtros" : ""}. Los gastos se registran en Gastos; las órdenes de compra, en Productos → Registro de compras.
           </EstadoVacio>
         ) : (
           <>

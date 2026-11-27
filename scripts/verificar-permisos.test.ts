@@ -120,6 +120,11 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/inventario/compras/[id]/page.tsx",
   "app/panel/inventario/configuracion/page.tsx",
   "app/panel/inventario/configuracion/actions.ts",
+  // Submódulos de Productos en construcción: no leen datos, pero piden
+  // inventario.consultar igual que el menú.
+  "app/panel/inventario/devoluciones/page.tsx",
+  "app/panel/inventario/full/page.tsx",
+  "app/panel/inventario/proyeccion/page.tsx",
   // «Descargar CSV» de inventario y kardex: mismo inventario.consultar
   // que ver las pantallas (401 sin sesión, 403 sin permiso).
   "app/api/inventario/exportar/route.ts",
