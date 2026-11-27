@@ -1,0 +1,1 @@
+- Detalle día a día: la fila de cada día vuelve a mostrar sus totales debajo de cada columna (con el margen en semáforo). Con la franja y el resumen a la derecha, los días cerrados dejaban las columnas vacías.
