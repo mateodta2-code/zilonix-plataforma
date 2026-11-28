@@ -733,6 +733,7 @@
     // recurso ajeno (inventarioAproximado).
     const inventarioTexto = leerInventarioMaximoDeTexto(U.textoDe([".ui-pdp-buybox__quantity__available"], doc));
     const inventario = elegirInventarioPrincipal(inventarioTexto, incrustado.inventarioSelector);
+    const vendedorLeido = elegirVendedor(recogerAnclasVendedor(doc), htmlCompleto, doc && doc.URL);
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -747,7 +748,8 @@
       vendidos,
       vendidosExacto,
       ventasPromedioMes: calcularVentasPromedioMes(vendidos, incrustado.dateCreated, undefined, esFull, vendidosExacto),
-      vendedor: U.textoDe([".ui-pdp-seller__header__title", ".ui-pdp-seller__link-trigger-button", "a.ui-pdp-seller__link-trigger-button"], doc),
+      vendedor: limpiarNombreTienda(U.textoDe([".ui-pdp-seller__header__title", ".ui-pdp-seller__link-trigger-button", "a.ui-pdp-seller__link-trigger-button"], doc)) || vendedorLeido.nombre,
+      vendedorLink: vendedorLeido.link,
       calificacion: U.calificacionDesdeTexto(U.textoDe([".ui-pdp-review__rating", ".ui-review-capability__rating__average"], doc)),
       numeroOpiniones: U.enteroDesdeTexto(U.textoDe([".ui-pdp-review__amount", ".ui-review-capability__rating__amount"], doc)),
       esCatalogo: tieneBuybox,
@@ -810,6 +812,94 @@
       return { valor: inventarioSelector, aproximado: false };
     }
     return inventarioTexto;
+  }
+
+  // Optimización — tienda del vendedor (nombre + link) en una ficha.
+  // Los selectores de clase de siempre (.ui-pdp-seller__header__title…)
+  // dejaron de coincidir en las fichas actuales (la tienda salía vacía),
+  // así que se prueba en este orden, sin depender de un nombre de clase:
+  //  1) un link a la tienda/perfil (/tienda/…, /perfil/…, _CustId_…),
+  //     de preferencia dentro de un bloque cuya clase diga "seller";
+  //  2) el nickname del vendedor en el JSON que la propia página incrusta;
+  //  3) solo el link, armado con el seller_id incrustado
+  //     (https://listado.<dominio>/_CustId_<id>), sin nombre.
+  // Nunca se inventa: sin nada confirmado, nombre y link son null.
+  const PATRON_LINK_TIENDA = /\/(?:tienda|perfil)\/[^/?#\s]+|_CustId_\d+|[?&]CustId=\d+/i;
+  const PATRON_DOMINIO_ML_TIENDA = /^https:\/\/([a-z0-9-]+\.)*mercado(libre\.(com\.co|com\.ar|com\.mx|cl|com\.uy|com\.pe)|livre\.com\.br)\//i;
+
+  function limpiarNombreTienda(texto) {
+    if (typeof texto !== "string") return null;
+    const limpio = texto
+      .replace(/\s+/g, " ")
+      .replace(/^\s*(vendido|vendida)\s+por\s*/i, "")
+      .trim();
+    if (limpio.length < 2 || limpio.length > 80) return null;
+    // Textos de botón/enlace que no son el nombre de nadie.
+    if (/^(ver|visitar|ir a|conoce|más|mas|seguir|ver más|ver mas)\b/i.test(limpio)) return null;
+    return limpio;
+  }
+
+  function linkTiendaAbsoluto(href, urlPagina) {
+    if (typeof href !== "string" || !href) return null;
+    try {
+      const u = new URL(href, urlPagina || undefined);
+      if (u.protocol !== "https:") return null;
+      u.hash = "";
+      const absoluto = u.toString();
+      return PATRON_DOMINIO_ML_TIENDA.test(absoluto) ? absoluto.slice(0, 500) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Puro: anclas = [{ href, texto, enSeller }] ya sacadas del DOM.
+  function elegirVendedor(anclas, html, urlPagina) {
+    const lista = Array.isArray(anclas) ? anclas : [];
+    const deTienda = lista.filter((a) => a && typeof a.href === "string" && PATRON_LINK_TIENDA.test(a.href));
+    const orden = [...deTienda.filter((a) => a.enSeller), ...deTienda.filter((a) => !a.enSeller)];
+    let nombre = null;
+    let link = null;
+    for (const a of orden) {
+      const l = linkTiendaAbsoluto(a.href, urlPagina);
+      if (!l) continue;
+      const n = limpiarNombreTienda(a.texto);
+      // Un link sin nombre sirve igual como link, pero se sigue buscando uno con nombre.
+      if (!link) link = l;
+      if (n) {
+        nombre = n;
+        link = l;
+        break;
+      }
+    }
+    const htmlTexto = typeof html === "string" ? html : "";
+    if (!nombre) {
+      const m = htmlTexto.match(/"seller"\s*:\s*\{[^{}]*?"nickname"\s*:\s*"([^"\\]{2,80})"/);
+      nombre = m ? limpiarNombreTienda(m[1]) : null;
+    }
+    if (!link) {
+      const id = leerSellerIdDeTienda(htmlTexto, null);
+      const host = (() => {
+        try {
+          return new URL(urlPagina).hostname;
+        } catch {
+          return "";
+        }
+      })();
+      const dominio = (host.match(/(mercado(?:libre|livre)\.(?:com\.co|com\.ar|com\.mx|cl|com\.uy|com\.pe|com\.br))$/i) || [])[1];
+      if (id && dominio) link = linkTiendaAbsoluto(`https://listado.${dominio}/_CustId_${id}`, null);
+    }
+    return { nombre, link };
+  }
+
+  function recogerAnclasVendedor(doc) {
+    const salida = [];
+    if (!doc || typeof doc.querySelectorAll !== "function") return salida;
+    for (const a of doc.querySelectorAll("a[href]")) {
+      const href = a.getAttribute("href") || "";
+      if (!PATRON_LINK_TIENDA.test(href)) continue;
+      salida.push({ href, texto: (a.textContent || "").trim(), enSeller: Boolean(a.closest && a.closest('[class*="seller"]')) });
+    }
+    return salida;
   }
 
   function leerTienda(doc) {
@@ -1414,6 +1504,8 @@
     construirLinkSeguirProducto,
     construirLinkSeguirTienda,
     leerSellerIdDeTienda,
+    elegirVendedor,
+    limpiarNombreTienda,
     extraerCustIdDeUrl,
     leerResenas,
     leerResenasDesdeScript,

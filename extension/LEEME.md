@@ -558,3 +558,10 @@ Reglas de siempre: nunca inicia sesión ni pasa un captcha (si ML pide verificar
 - La ficha ya traía tienda (`vendedor`) y disponibles (`inventario`, `+50`); ahora se muestran como columnas en Optimización.
 
 Pruebas en `extension/background.test.ts` (url oculta, url ajena, ranking por parecido, modo links, links ajenos). **Hay que reinstalar la extensión** (cambia el código de `background.js`); bajar el ZIP solo cuando `version.json` ya muestre 0.3.48.
+
+## v0.3.49 — tienda con link y qué cambió en cada competidor
+
+- **Tienda (nombre + link)**: los selectores de clase de siempre ya no coincidían en las fichas actuales y la tienda salía vacía. `elegirVendedor` (lectores/mercadolibre.js) busca, sin depender de nombres de clase: un link `/tienda/…`, `/perfil/…` o `_CustId_…` (de preferencia dentro de un bloque cuya clase diga "seller"), luego el `nickname` del JSON incrustado, y por último solo el link armado con el `seller_id`. Solo dominios de Mercado Libre por https; sin datos, `null`. `vendedorLink` viaja en el resultado de la ficha.
+- Pruebas con estructuras que imitan la ficha: no se pudo comparar contra una ficha real desde el entorno de desarrollo (Mercado Libre pide verificación de cuenta).
+
+**Hay que reinstalar la extensión.** Bajar el ZIP solo cuando `version.json` ya muestre 0.3.49.

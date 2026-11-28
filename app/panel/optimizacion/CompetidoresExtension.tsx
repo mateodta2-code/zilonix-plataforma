@@ -20,6 +20,7 @@ import {
   ROTULO_PARECIDO,
   rotuloAntiguedad,
   terminoDesdeTitulo,
+  textoCambio,
   TERMINO_POR_LINK,
   textoRazonCompetidores,
   type CompetidorExtension,
@@ -132,7 +133,11 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
       const actual = resultadoRef.current;
       const fusion = fusionarCompetidores(actual?.competidores ?? [], m.competidores, modo, new Date().toISOString());
       if (modo === "links") {
-        setAvisoOk(fusion.leidos > 0 ? `Se actualizaron los datos de ${fusion.leidos} ${fusion.leidos === 1 ? "competidor" : "competidores"}.` : null);
+        setAvisoOk(
+          fusion.leidos > 0
+            ? `Se actualizaron los datos de ${fusion.leidos} ${fusion.leidos === 1 ? "competidor" : "competidores"}: ${fusion.conCambios === 0 ? "ninguno cambió" : `${fusion.conCambios} con cambios`}.`
+            : null
+        );
         if (fusion.noLeidos > 0) setAviso(`${fusion.noLeidos} no se pudo leer en Mercado Libre; se conservan los datos que ya tenías.`);
         if (fusion.leidos === 0) return;
       }
@@ -210,7 +215,7 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
     return (
       <p className={styles.nota}>
         {motivo}. Para compararla con otras del mismo producto, instala o actualiza la extensión de Zilonix (versión
-        0.3.48 o más nueva) y recarga esta página.
+        0.3.49 o más nueva) y recarga esta página.
       </p>
     );
   }
@@ -219,6 +224,8 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
   const num = (v: number | null) => (v === null ? "—" : formatearNumero(v, idioma));
   const competidores = resultado?.competidores ?? [];
   const alertas = resultado && competidores.length > 0 ? alertasCompetidoresExtension(propia, competidores) : [];
+  const comparados = competidores.filter((c) => c.cambiosDesdeTs !== null);
+  const conCambios = comparados.filter((c) => c.cambios.length > 0);
   const formatoFecha = (iso: string) => new Date(iso).toLocaleString(idioma || "es", { dateStyle: "short", timeStyle: "short" });
 
   return (
@@ -294,6 +301,29 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
               </Boton>
               <span className={styles.estadoCompetidor}>Vuelve a leer cada ficha en Mercado Libre; si una falla, se conservan los datos anteriores.</span>
             </div>
+            {comparados.length > 0 ? (
+              <div className={styles.resumenCambios} role="status">
+                <strong>{conCambios.length === 0 ? "Ningún competidor cambió en la última actualización." : `Qué cambió en la última actualización (${conCambios.length} de ${comparados.length}):`}</strong>
+                {conCambios.length > 0 ? (
+                  <ul>
+                    {conCambios.map((c) => (
+                      <li key={claveCompetidor(c)}>
+                        <span>{c.titulo ?? c.itemId ?? "Competidor"}</span>
+                        <ul>
+                          {c.cambios.map((cb) => {
+                            const t = textoCambio(cb, { plata: (n) => plata(n), num: (n) => num(n) });
+                            return <li key={cb.campo}>{`${t.icono} ${t.texto}`}</li>;
+                          })}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <span className={styles.estadoCompetidor}>
+                  Se compara con la lectura anterior de cada ficha{conCambios[0]?.cambiosDesdeTs ? ` (${formatoFecha(conCambios[0].cambiosDesdeTs)})` : ""}. Ventas y facturación aprox. solo avisan si cambian un 5 % o más.
+                </span>
+              </div>
+            ) : null}
             <Tabla encabezados={ENCABEZADOS} scroll>
               <FilaTabla className={styles.filaPropia}>
                 <CeldaTabla>
@@ -343,10 +373,26 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
                           </a>
                           <div className={styles.nota}>{[c.itemId, c.manual ? "agregado por link" : null, c.leidoDeFicha ? null : "solo datos del listado"].filter(Boolean).join(" · ")}</div>
                           {nivel ? <div className={`${styles.estadoCompetidor} ${clase}`}>{ROTULO_PARECIDO[nivel]}</div> : null}
+                          {c.cambios.length > 0 ? (
+                            <ul className={styles.cambios} aria-label="Qué cambió en la última actualización">
+                              {c.cambios.map((cb) => {
+                                const t = textoCambio(cb, { plata: (n) => plata(n), num: (n) => num(n) });
+                                return <li key={cb.campo}>{`${t.icono} ${t.texto}`}</li>;
+                              })}
+                            </ul>
+                          ) : null}
                         </div>
                       </div>
                     </CeldaTabla>
-                    <CeldaTabla>{c.vendedor ?? "—"}</CeldaTabla>
+                    <CeldaTabla>
+                      {c.vendedorLink ? (
+                        <a href={c.vendedorLink} target="_blank" rel="noopener noreferrer" className={styles.enlace}>
+                          {c.vendedor ?? "Ver tienda"}
+                        </a>
+                      ) : (
+                        (c.vendedor ?? "—")
+                      )}
+                    </CeldaTabla>
                     <CeldaTabla numerica>
                       {plata(c.precio)}
                       {c.precioAnterior !== null ? <span className={styles.precioAntes}>{plata(c.precioAnterior)}</span> : null}

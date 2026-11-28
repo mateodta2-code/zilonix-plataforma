@@ -1937,6 +1937,7 @@
         vendidos: datos.vendidos ?? null,
         vendidosExacto: typeof datos.vendidosExacto === "boolean" ? datos.vendidosExacto : null,
         vendedor: datos.vendedor ?? null,
+        vendedorLink: datos.vendedorLink ?? null,
         calificacion: datos.calificacion ?? null,
         numeroOpiniones: datos.numeroOpiniones ?? null,
         esCatalogo: typeof datos.esCatalogo === "boolean" ? datos.esCatalogo : null,
