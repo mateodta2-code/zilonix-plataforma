@@ -7,7 +7,7 @@ import { normalizarBusqueda, porcentajeVentasConCosto, resolverRangoVentas, type
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
-import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla } from "@/components/marco/Tabla";
+import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
@@ -51,6 +51,17 @@ function encabezado(nombre: string): EncabezadoTabla {
 }
 
 const COLUMNAS_DETALLE: EncabezadoTabla[] = [{ clave: "nivel", contenido: "Día · cuenta · producto" }, ...NOMBRES_COLUMNAS.map(encabezado)];
+// Fila de grupos encima de las columnas del detalle (el usuario pidió
+// mantenerla con el estilo OS, 27-nov): se lee como la fórmula. Mismo
+// orden que NOMBRES_COLUMNAS: 2 + 5 + 2 + 2 = 11.
+const GRUPOS_DETALLE: GrupoEncabezado[] = [
+  { clave: "nivel", etiqueta: "", columnas: 1, className: estilos.grupoVacio },
+  { clave: "vendiste", etiqueta: "Lo que vendiste", columnas: 2, className: estilos.grupo },
+  { clave: "descuenta", etiqueta: "Lo que se descuenta", columnas: 5, className: estilos.grupo },
+  { clave: "ganaste", etiqueta: "Lo que ganaste", columnas: 2, className: `${estilos.grupo} ${estilos.grupoResultado}` },
+  { clave: "datos", etiqueta: "Datos", columnas: 2, className: estilos.grupo },
+];
+
 const COLUMNAS_TOTAL_CUENTA: EncabezadoTabla[] = [{ clave: "cuenta", contenido: "Cuenta" }, ...NOMBRES_COLUMNAS.map(encabezado), encabezado("% con costo")];
 
 
@@ -275,6 +286,7 @@ export async function DetalleDiaCuentaProducto({
                   <TablaDetalleAcordeon
                     key={`${filtros.cuenta ?? ""}|${filtros.desde}|${filtros.hasta}|${filtros.costo ?? ""}|${filtros.buscar ?? ""}`}
                     encabezados={COLUMNAS_DETALLE}
+                    grupos={GRUPOS_DETALLE}
                     dias={dias}
                     pedidoIdExterno={pedidoIdExternoRango}
                     conDevolucion={[...conDevolucion].filter((id) => idsRango.has(id))}

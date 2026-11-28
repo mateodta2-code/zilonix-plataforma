@@ -1,0 +1,1 @@
+- Detalle día a día: vuelve la fila de grupos encima de las columnas («Lo que vendiste», «Lo que se descuenta», «Lo que ganaste» en azul, «Datos»), junto con el estilo del Zilonix OS.
