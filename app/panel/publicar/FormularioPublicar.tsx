@@ -9,6 +9,7 @@ import { crearYPublicarProductoAction } from "./actions";
 import { ConectarCanva } from "./ConectarCanva";
 import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
+import { SeccionFalabella } from "./SeccionFalabella";
 import { CrearConIA } from "./CrearConIA";
 import { GenerarConIA } from "./GenerarConIA";
 import { borrarBorradoresIA, CLAVES_BORRADOR_IA, useBorradorIA } from "./ia/borradorIA";
@@ -51,12 +52,16 @@ type RespuestaCaracteristicas = {
 // falta un efecto que "reseedee" el estado a mano.
 export function FormularioPublicar({
   cuentas,
+  cuentasFalabella,
   inicial,
   cloudinaryConfigurado,
   canva,
   canvaCodigo,
 }: {
   cuentas: Cuenta[];
+  // Cuentas de Falabella conectadas: van en «Cuentas destino» como otro grupo,
+  // pero nunca entran a las secciones por cuenta de Mercado Libre.
+  cuentasFalabella: Cuenta[];
   inicial: EstadoInicialFormulario;
   cloudinaryConfigurado: boolean;
   canva: string;
@@ -167,6 +172,7 @@ export function FormularioPublicar({
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
 
   const cuentasMarcadas = useMemo(() => cuentas.filter((c) => incluidas[c.id]), [cuentas, incluidas]);
+  const falabellaMarcadas = useMemo(() => cuentasFalabella.filter((c) => incluidas[c.id]), [cuentasFalabella, incluidas]);
   const cuentaReferencia = cuentasMarcadas[0]?.id ?? null;
   // Issue #315 — la categoría se detecta/guarda en el site_id REAL de
   // la cuenta de referencia (la primera marcada), nunca "MCO" fijo.
@@ -252,12 +258,13 @@ export function FormularioPublicar({
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     setErrorEnvio(null);
-    if (cuentasMarcadas.length === 0) {
+    if (cuentasMarcadas.length === 0 && falabellaMarcadas.length === 0) {
       e.preventDefault();
-      setErrorEnvio("Elige al menos una cuenta de Mercado Libre donde publicar.");
+      setErrorEnvio("Elige al menos una cuenta (Mercado Libre o Falabella) donde publicar.");
       return;
     }
-    if (esRellenoFalsoDimensiones(dimensiones)) {
+    // Las medidas de Mercado Libre solo se exigen si hay una cuenta de Mercado Libre marcada.
+    if (cuentasMarcadas.length > 0 && esRellenoFalsoDimensiones(dimensiones)) {
       e.preventDefault();
       setErrorEnvio(
         "Las 4 medidas del paquete están en 1 o menos — parece un relleno sin medir de verdad. Mercado Libre usa esto para calcular el envío real: completá el peso/largo/ancho/alto reales del paquete."
@@ -287,8 +294,14 @@ export function FormularioPublicar({
       {/* --- Punto 3: Cuentas destino --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Cuentas destino</p>
-        <CuentasDestino grupos={[{ titulo: "Cuentas", cuentas }]} incluidas={incluidas} onCambiar={setIncluidas} />
+        <CuentasDestino
+          grupos={[{ titulo: "Mercado Libre", cuentas }, ...(cuentasFalabella.length > 0 ? [{ titulo: "Falabella", cuentas: cuentasFalabella }] : [])]} incluidas={incluidas}
+          onCambiar={setIncluidas}
+        />
       </Tarjeta>
+
+      {/* --- Publicar en Falabella: solo si hay una cuenta de Falabella marcada --- */}
+      {falabellaMarcadas.length > 0 && <SeccionFalabella cuentaId={falabellaMarcadas[0].id} tituloSugerido={tituloReferencia.slice(0, 60)} />}
 
       {/* --- Punto 4: Datos generales --- */}
       <Tarjeta className={styles.seccion}>

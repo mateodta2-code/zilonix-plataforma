@@ -6,6 +6,7 @@ import { FormularioPublicar } from "./FormularioPublicar";
 import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
 import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
+import { HistorialFalabella, type PublicacionFalabella } from "./HistorialFalabella";
 import {
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
@@ -56,6 +57,8 @@ function estadoInicialDesdePrefill(cuentas: Cuenta[], prefill: { titulo: string;
 // FormularioPublicar.tsx, remontado entero cuando formKey cambia.
 export function PaginaPublicar({
   cuentas,
+  cuentasFalabella,
+  historialFalabella,
   historial,
   prefillNuevo,
   itemImportado,
@@ -66,6 +69,8 @@ export function PaginaPublicar({
   canvaCodigo,
 }: {
   cuentas: Cuenta[];
+  cuentasFalabella: Cuenta[];
+  historialFalabella: PublicacionFalabella[];
   historial: ProductoHistorial[];
   prefillNuevo: { titulo: string; precio: string; foto: string };
   itemImportado: ItemImportado | null;
@@ -163,11 +168,14 @@ export function PaginaPublicar({
       <FormularioPublicar
         key={formKey}
         cuentas={cuentas}
+        cuentasFalabella={cuentasFalabella}
         inicial={formInicial}
         cloudinaryConfigurado={cloudinaryConfigurado}
         canva={canva}
         canvaCodigo={canvaCodigo}
       />
+
+      <HistorialFalabella publicaciones={historialFalabella} />
 
       {/* --- Punto 8: historial (y, Parte 3 punto B, el permalink real por cuenta) --- */}
       <HistorialPublicaciones

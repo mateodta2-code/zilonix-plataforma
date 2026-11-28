@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { type AnyPgColumn, boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
+import type { BorradorFalabella, EstadoPublicacionFalabella } from "@/lib/falabella/publicar-reglas";
 import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
 import type {
   DatosPorCuenta,
@@ -711,6 +712,47 @@ export const cuentasFalabella = pgTable(
     // referenciadas. Así una empresa nunca cuelga un movimiento de la
     // cuenta de otra aunque conozca su uuid (el chequeo de FK no pasa por RLS).
     empresaIdUnica: unique("cuentas_falabella_empresa_id_unica").on(t.empresaId, t.id),
+  })
+);
+
+// Publicar en Falabella (28/11/2026) — historial igual al de Mercado Libre
+// (productos_ml): una fila por producto y por cuenta de Falabella. El flujo
+// es borrador (Mateo lo revisa) → creando (feed de ProductCreate) →
+// imagenes (feed de Image) → publicado, o rechazado con el motivo que dé
+// Falabella. `borrador` guarda lo calculado con las reglas de Mateo
+// (lib/falabella/publicar-reglas.ts), nunca la API Key.
+export const publicacionesFalabella = pgTable(
+  "publicaciones_falabella",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaFalabellaId: uuid("cuenta_falabella_id").notNull(),
+    sku: text("sku").notNull(),
+    titulo: text("titulo").notNull(),
+    borrador: jsonb("borrador").$type<BorradorFalabella>().notNull(),
+    estado: text("estado").$type<EstadoPublicacionFalabella>().notNull().default("borrador"),
+    feedProductoId: text("feed_producto_id"),
+    feedImagenesId: text("feed_imagenes_id"),
+    // Motivos de rechazo dados por Falabella (por campo), máximo 10.
+    errores: jsonb("errores").$type<string[]>().notNull().default([]),
+    creadoPorUsuarioId: uuid("creado_por_usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // FK compuesta: una empresa nunca cuelga una publicación de la cuenta
+    // de otra (el chequeo de FK no pasa por RLS) — mismo criterio que
+    // movimientos_marketplace.
+    cuentaDeLaEmpresa: foreignKey({
+      columns: [t.empresaId, t.cuentaFalabellaId],
+      foreignColumns: [cuentasFalabella.empresaId, cuentasFalabella.id],
+      name: "publicaciones_falabella_cuenta_empresa_fk",
+    }),
+    estadoValido: check(
+      "publicaciones_falabella_estado_valido",
+      sql`${t.estado} IN ('borrador', 'creando', 'imagenes', 'publicado', 'rechazado')`
+    ),
+    porEmpresa: index("publicaciones_falabella_empresa_creado_idx").on(t.empresaId, t.creadoTs),
   })
 );
 

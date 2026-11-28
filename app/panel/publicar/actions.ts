@@ -7,6 +7,9 @@ import { listarEmpresasDeUsuario } from "@/lib/empresas";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
+import { guardarBorrador as guardarBorradorFalabella } from "@/lib/falabella/publicaciones";
+import { construirBorrador } from "@/lib/falabella/publicar-reglas";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { productosMl } from "@/db/schema";
 import { publicarProductoEnCuentas } from "@/lib/ml/publicar";
@@ -44,19 +47,13 @@ function parsearLineasClaveValor(texto: string): Record<string, string> {
   return resultado;
 }
 
-export async function crearYPublicarProductoAction(formData: FormData): Promise<void> {
-  const usuario = await obtenerOCrearUsuarioActual();
-  if (!usuario) redirect("/sign-in");
-  const empresa = await empresaActivaDe(usuario.id);
-
-  await requierePermiso(usuario.id, empresa.id, "inventario", "crear");
-
-  const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs);
-  const cuentasSeleccionadas = cuentas.filter((c) => formData.get(`incluir_${c.id}`) === "on").map((c) => c.id);
-  if (cuentasSeleccionadas.length === 0) {
-    throw new Error("Elegí al menos una cuenta de Mercado Libre donde publicar.");
-  }
-
+async function publicarEnMercadoLibre(
+  formData: FormData,
+  empresaId: string,
+  usuarioId: string,
+  cuentas: Awaited<ReturnType<typeof listarCuentasConectadas>>,
+  cuentasSeleccionadas: string[]
+): Promise<void> {
   const porCuenta: Record<string, DatosPorCuenta> = {};
   for (const c of cuentas) {
     const titulo = String(formData.get(`titulo_${c.id}`) ?? "").trim();
@@ -138,11 +135,11 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
     variantes = { ejes: v.ejes, ejeFoto: v.ejeFoto ?? null, combinaciones: v.combinaciones };
   }
 
-  const producto = await dbComoEmpresa(empresa.id, (tx) =>
+  const producto = await dbComoEmpresa(empresaId, (tx) =>
     tx
       .insert(productosMl)
       .values({
-        empresaId: empresa.id,
+        empresaId: empresaId,
         // Título de la primera cuenta, para que el historial no diga «(sin título)» mientras publica.
         titulo: tituloInicialPublicacion(porCuenta, cuentasSeleccionadas),
         precio,
@@ -159,7 +156,7 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
         cuentasSeleccionadas,
         modoPrueba,
         estado: "publicando",
-        creadoPorUsuarioId: usuario.id,
+        creadoPorUsuarioId: usuarioId,
       })
       .returning({ id: productosMl.id })
   );
@@ -168,9 +165,71 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
   // corre en segundo plano, sin bloquear la respuesta. El servidor es
   // un proceso Node persistente en Railway (nunca serverless), así que
   // la promesa sí llega a completarse aunque la petición ya respondió.
-  publicarProductoEnCuentas(empresa.id, producto[0].id).catch((error) => {
+  publicarProductoEnCuentas(empresaId, producto[0].id).catch((error) => {
     console.error("Error publicando el producto:", error instanceof Error ? error.message : error);
   });
+
+}
+
+// Datos generales (precio = el de Asana = precio de oferta, stock, SKU, fotos)
+// vienen del formulario; lo propio de Falabella (título ≤ 60, descripción,
+// marca real en Modelo, categoría, medidas reales opcionales) de sus campos.
+async function guardarBorradoresFalabella(formData: FormData, empresaId: string, usuarioId: string, cuentaIds: string[]): Promise<void> {
+  const numero = (nombre: string) => {
+    const v = String(formData.get(nombre) ?? "").trim();
+    return v && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : undefined;
+  };
+  const medidas = {
+    ...(numero("falabella_largo") && { largo: numero("falabella_largo") }),
+    ...(numero("falabella_ancho") && { ancho: numero("falabella_ancho") }),
+    ...(numero("falabella_alto") && { alto: numero("falabella_alto") }),
+    ...(numero("falabella_peso") && { peso: numero("falabella_peso") }),
+  };
+  const entrada = {
+    sku: String(formData.get("sku") ?? ""),
+    titulo: String(formData.get("falabella_titulo") ?? ""),
+    descripcion: String(formData.get("falabella_descripcion") ?? ""),
+    modelo: String(formData.get("falabella_modelo") ?? ""),
+    precioOferta: Number(formData.get("precio") ?? 0),
+    stock: Number(formData.get("stock") ?? 1),
+    categoriaId: Number(formData.get("falabella_categoria") ?? 0),
+    imagenes: String(formData.get("imagenes") ?? "").split("\n"),
+    medidas,
+  };
+  const borrador = construirBorrador(entrada);
+  for (const cuentaFalabellaId of cuentaIds) {
+    await guardarBorradorFalabella(empresaId, { cuentaFalabellaId, borrador, usuarioId });
+  }
+}
+
+export async function crearYPublicarProductoAction(formData: FormData): Promise<void> {
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) redirect("/sign-in");
+  const empresa = await empresaActivaDe(usuario.id);
+
+  await requierePermiso(usuario.id, empresa.id, "inventario", "crear");
+
+  const cuentas = (await listarCuentasConectadas(empresa.id)).filter((c) => !c.desconectadaTs);
+  const cuentasSeleccionadas = cuentas.filter((c) => formData.get(`incluir_${c.id}`) === "on").map((c) => c.id);
+  // Publicar en Falabella: las cuentas de Falabella van en el mismo grupo de
+  // "Cuentas destino" y se marcan con el mismo `incluir_<id>`.
+  const cuentasFalabella = (await listarCuentasFalabella(empresa.id)).filter((c) => !c.desconectadaTs);
+  const falabellaSeleccionadas = cuentasFalabella.filter((c) => formData.get(`incluir_${c.id}`) === "on").map((c) => c.id);
+  if (cuentasSeleccionadas.length === 0 && falabellaSeleccionadas.length === 0) {
+    throw new Error("Elegí al menos una cuenta (Mercado Libre o Falabella) donde publicar.");
+  }
+
+  // Mercado Libre: igual que siempre. Se valida y publica ANTES de guardar los
+  // borradores de Falabella, para que un error de ML no deje borradores sueltos.
+  if (cuentasSeleccionadas.length > 0) {
+    await publicarEnMercadoLibre(formData, empresa.id, usuario.id, cuentas, cuentasSeleccionadas);
+  }
+
+  // Falabella: nunca se crea directo. Se guarda el borrador (con las reglas de
+  // Mateo ya aplicadas) y la persona lo aprueba en el historial.
+  if (falabellaSeleccionadas.length > 0) {
+    await guardarBorradoresFalabella(formData, empresa.id, usuario.id, falabellaSeleccionadas);
+  }
 
   // Parte 2 (página única, estructura de Zilonix OS) — antes esto
   // mandaba a /panel/publicar/{id} (su propia pantalla de detalle).
@@ -180,7 +239,7 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
   // sigue existiendo (nunca se borró) para quien tenga ese link viejo
   // guardado — "ver detalle" en la tabla del historial sigue
   // enlazando ahí.
-  redirect(`/panel/publicar#historial`);
+  redirect(cuentasSeleccionadas.length > 0 ? `/panel/publicar#historial` : `/panel/publicar#historial-falabella`);
 }
 
 // Punto 8 del pedido de Mateo — "Borrar (🗑): confirma y borra SOLO la
