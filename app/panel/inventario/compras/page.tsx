@@ -2,13 +2,15 @@ import Link from "next/link";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { tienePermiso } from "@/lib/roles";
+import { normalizarParametro } from "@/lib/filtros-listado";
 import { listarBodegas } from "@/lib/inventario/bodegas";
-import { listarOrdenesCompra } from "@/lib/inventario/compras";
+import { listarRegistroCompras, sugerenciasFormaPago } from "@/lib/inventario/compras";
+import { diasEntre, diasQueFaltan, fechaCorta, hoyBogota } from "@/lib/inventario/registro-compras";
 import { listarSkusConStock } from "@/lib/inventario/stock";
 import { listarTerceros } from "@/lib/terceros";
-import { crearOrdenCompraAction } from "./actions";
-import { Boton } from "@/components/marco/Boton";
-import { Campo } from "@/components/marco/Campo";
+import { mostrarMonto } from "@/lib/finanzas/montos";
+import { registrarCompraAction } from "./actions";
+import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Chip } from "@/components/marco/Chip";
 import { ESTADO_OC } from "@/components/inventario/estados";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
@@ -17,13 +19,40 @@ import { SinAcceso } from "@/components/marco/SinAcceso";
 import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
+import { FormularioCompra } from "@/components/inventario/FormularioCompra";
+import { SkuCopiable } from "@/components/marco/SkuCopiable";
 import styles from "../inventario.module.css";
 
-const FILAS = 8;
+// Registro de compras (27-nov) — la hoja «PRODUCTOS COMPRADOS» del Zilonix
+// OS: una fila por producto comprado, con fecha, cantidad, total, forma de
+// pago, plataforma, SKU, liquidado, orden y link de la plataforma, y las
+// fechas de entrega. Ver pide inventario.consultar; agregar,
+// inventario.crear (también en la acción). La compra sola no mueve stock:
+// lo mueve la recepción, desde el detalle de la OC.
+const ENCABEZADOS = [
+  "OC",
+  "Fecha",
+  "Nombre producto",
+  "Cantidad",
+  "Total",
+  "Valor unidad",
+  "Forma pago",
+  "Plataforma",
+  "SKU",
+  "Liquidado",
+  "Orden de compra",
+  "Link",
+  "Fecha de entrega",
+  "Días en llegar",
+  "Entrega estimada",
+  "Días que faltan",
+];
 
-// Issue #280 — órdenes de compra simples. Ver pide
-// inventario.consultar; crear, inventario.crear (también en la acción).
-// La OC sola no mueve stock: lo mueve la recepción.
+function textoDias(dias: number | null): string {
+  if (dias === null) return "—";
+  return `${dias} ${Math.abs(dias) === 1 ? "día" : "días"}`;
+}
+
 export default async function ComprasPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const { usuario, activa, permisos, rolNombre } = await obtenerContextoPanel();
   try {
@@ -33,97 +62,123 @@ export default async function ComprasPage({ searchParams }: { searchParams: Reco
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a esta pantalla.`} />;
   }
   const puedeCrear = tienePermiso(permisos, "inventario", "crear");
-  // Los proveedores son de finanzas: si el rol no puede verlos, la OC
-  // se crea sin proveedor (el campo es opcional).
-  const veProveedores = tienePermiso(permisos, "finanzas", "consultar");
-  const [ordenes, lista, skusSimples, proveedores] = await Promise.all([
-    listarOrdenesCompra(activa.id),
-    listarBodegas(activa.id, { soloActivas: true }),
+  // Los proveedores y las cuentas de Disponible son de finanzas: sin ese
+  // permiso, la compra se registra sin proveedor y la forma de pago solo
+  // sugiere las que ya se usaron.
+  const veFinanzas = tienePermiso(permisos, "finanzas", "consultar");
+  const buscar = (normalizarParametro(searchParams.buscar) ?? "").trim().slice(0, 120);
+  const [filas, lista, skusSimples, proveedores, formasPago] = await Promise.all([
+    listarRegistroCompras(activa.id, buscar),
+    puedeCrear ? listarBodegas(activa.id, { soloActivas: true }) : Promise.resolve([]),
     puedeCrear ? listarSkusConStock(activa.id) : Promise.resolve([]),
-    puedeCrear && veProveedores ? listarTerceros(activa.id) : Promise.resolve([]),
+    puedeCrear && veFinanzas ? listarTerceros(activa.id) : Promise.resolve([]),
+    puedeCrear ? sugerenciasFormaPago(activa.id, veFinanzas) : Promise.resolve([]),
   ]);
+  const hoy = hoyBogota(new Date());
 
   return (
     <>
-      <EncabezadoPagina titulo="Registro de compras" descripcion="Lo que le pediste a un proveedor. Al recibir, el stock sube y la orden se cierra sola." />
+      <EncabezadoPagina
+        titulo="Registro de compras"
+        descripcion="Cada producto que compras, con su plataforma, pago y entrega. Al recibirlo en su orden (OC), el stock sube y el kardex dice de qué OC vino."
+      />
       <AvisosUrl searchParams={searchParams} />
 
-      {puedeCrear && lista.length > 0 && skusSimples.length > 0 && (
+      {puedeCrear && lista.length > 0 && (
         <Tarjeta>
-          <h2 className={styles.tituloSeccion}>Nueva orden</h2>
-          <form action={crearOrdenCompraAction} className={styles.form}>
-            <div className={styles.filaForm}>
-              <Campo etiqueta="Bodega de destino">
-                <select name="bodegaDestinoId" required className="zx-control" defaultValue={lista.find((b) => b.esPrincipal)?.id ?? lista[0].id}>
-                  {lista.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.nombre}
-                    </option>
-                  ))}
-                </select>
-              </Campo>
-              {proveedores.length > 0 && (
-                <Campo etiqueta="Proveedor (opcional)">
-                  <select name="terceroId" className="zx-control" defaultValue="">
-                    <option value="">Sin proveedor</option>
-                    {proveedores.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombre}
-                      </option>
-                    ))}
-                  </select>
-                </Campo>
-              )}
-              <Campo etiqueta="Nota (opcional)">
-                <input name="nota" maxLength={200} className="zx-control" />
-              </Campo>
+          <details open={filas.length === 0 && !buscar}>
+            <summary className={styles.tituloSeccion} style={{ cursor: "pointer" }}>
+              + Agregar compra
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <FormularioCompra
+                accion={registrarCompraAction}
+                skus={skusSimples.map((s) => ({ id: s.id, codigo: s.codigo, nombre: s.nombre }))}
+                bodegas={lista.map((b) => ({ id: b.id, nombre: b.nombre, esPrincipal: b.esPrincipal }))}
+                proveedores={proveedores.map((p) => ({ id: p.id, nombre: p.nombre }))}
+                formasPago={formasPago}
+                hoy={hoy}
+              />
             </div>
-            <div className={styles.lineasOc}>
-              {Array.from({ length: FILAS }, (_, i) => (
-                <div key={i} className={styles.filaForm}>
-                  <select name={`sku_${i}`} className="zx-control" defaultValue="" aria-label={`SKU línea ${i + 1}`}>
-                    <option value="">—</option>
-                    {skusSimples.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.codigo} — {s.nombre}
-                      </option>
-                    ))}
-                  </select>
-                  <input name={`cantidad_${i}`} type="number" min={1} step={1} placeholder="Cantidad" className="zx-control" aria-label={`Cantidad línea ${i + 1}`} />
-                  <input name={`costo_${i}`} inputMode="decimal" placeholder="Costo unitario (opcional)" className="zx-control" aria-label={`Costo línea ${i + 1}`} />
-                </div>
-              ))}
-            </div>
-            <Boton type="submit" className={styles.botonCrear}>
-              Crear orden
-            </Boton>
-          </form>
+          </details>
         </Tarjeta>
       )}
+      {puedeCrear && lista.length === 0 && <EstadoVacio>Primero crea una bodega activa en Inventario: ahí llega lo que compras.</EstadoVacio>}
 
-      <div style={{ height: 16 }} />
+      <form method="get" className={styles.filtros}>
+        <label className={styles.campoBusqueda} style={{ flex: "1 1 320px" }}>
+          <span className="zx-etiqueta">Buscar</span>
+          <input type="search" name="buscar" defaultValue={buscar} placeholder="Producto, plataforma, SKU, OC, orden, forma de pago, fecha…" className="zx-control" />
+        </label>
+        <div className={styles.accionesFiltro}>
+          <Boton type="submit">Buscar</Boton>
+          {buscar && (
+            <BotonLink href="/panel/inventario/compras" variante="fantasma">
+              Limpiar
+            </BotonLink>
+          )}
+        </div>
+      </form>
 
-      {ordenes.length === 0 ? (
-        <EstadoVacio>Todavía no hay órdenes de compra.</EstadoVacio>
+      {filas.length === 0 ? (
+        <EstadoVacio>{buscar ? `No hay compras que coincidan con «${buscar}».` : "Todavía no hay compras registradas."}</EstadoVacio>
       ) : (
-        <Tabla encabezados={["Orden", "Proveedor", "Bodega", "SKU", "Estado", "Creada"]}>
-          {ordenes.map((o) => (
-            <FilaTabla key={o.id}>
-              <CeldaTabla>
-                <Link href={`/panel/inventario/compras/${o.id}`} className={styles.enlaceAviso}>
-                  OC-{o.numero}
-                </Link>
-              </CeldaTabla>
-              <CeldaTabla>{o.proveedor ?? "—"}</CeldaTabla>
-              <CeldaTabla>{o.bodega}</CeldaTabla>
-              <CeldaTabla className={styles.numero}>{o.lineas}</CeldaTabla>
-              <CeldaTabla>
-                <Chip estado={ESTADO_OC[o.estado]?.estado ?? "neutro"}>{ESTADO_OC[o.estado]?.texto ?? o.estado}</Chip>
-              </CeldaTabla>
-              <CeldaTabla>{o.creadoTs.toLocaleDateString("es-CO", { timeZone: "America/Bogota" })}</CeldaTabla>
-            </FilaTabla>
-          ))}
-        </Tabla>
+        <>
+          <Tabla encabezados={ENCABEZADOS} scroll>
+            {filas.map((f) => {
+              const diasLlegar = diasEntre(f.fechaCompra, f.fechaEntrega);
+              const faltan = f.estado === "anulada" ? null : diasQueFaltan(f.entregaEstimada, f.fechaEntrega, hoy);
+              return (
+                <FilaTabla key={`${f.ordenId}-${f.skuCodigo}`}>
+                  <CeldaTabla>
+                    <Link href={`/panel/inventario/compras/${f.ordenId}`} className={styles.enlaceAviso}>
+                      OC-{f.numero}
+                    </Link>
+                    <div>
+                      <Chip estado={ESTADO_OC[f.estado]?.estado ?? "neutro"}>{ESTADO_OC[f.estado]?.texto ?? f.estado}</Chip>
+                    </div>
+                  </CeldaTabla>
+                  <CeldaTabla>{fechaCorta(f.fechaCompra)}</CeldaTabla>
+                  <CeldaTabla>
+                    <div style={{ minWidth: 220, maxWidth: 320, whiteSpace: "normal" }}>{f.producto}</div>
+                  </CeldaTabla>
+                  <CeldaTabla className={styles.numero}>
+                    {f.cantidad}
+                    {f.recibida > 0 && f.recibida !== f.cantidad && <div className={styles.detalle}>llegaron {f.recibida}</div>}
+                  </CeldaTabla>
+                  <CeldaTabla className={styles.numero}>{mostrarMonto(f.total)}</CeldaTabla>
+                  <CeldaTabla className={styles.numero}>{mostrarMonto(f.valorUnidad)}</CeldaTabla>
+                  <CeldaTabla>{f.formaPago ?? "—"}</CeldaTabla>
+                  <CeldaTabla>{f.plataforma ?? "—"}</CeldaTabla>
+                  <CeldaTabla>
+                    <SkuCopiable sku={f.skuCodigo} />
+                  </CeldaTabla>
+                  <CeldaTabla>{f.liquidado ? fechaCorta(f.liquidado) : <Chip estado="aviso">pendiente</Chip>}</CeldaTabla>
+                  <CeldaTabla>{f.ordenPlataforma ?? "—"}</CeldaTabla>
+                  <CeldaTabla>
+                    {f.linkCompra ? (
+                      <a href={f.linkCompra} target="_blank" rel="noopener noreferrer" className={styles.enlaceAviso}>
+                        Abrir
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </CeldaTabla>
+                  <CeldaTabla>{f.fechaEntrega ? fechaCorta(f.fechaEntrega) : "—"}</CeldaTabla>
+                  <CeldaTabla className={styles.numero}>{textoDias(diasLlegar)}</CeldaTabla>
+                  <CeldaTabla>{fechaCorta(f.entregaEstimada)}</CeldaTabla>
+                  <CeldaTabla className={styles.numero}>
+                    {faltan !== null && faltan < 0 ? <Chip estado="peligro">{`atrasada ${textoDias(-faltan)}`}</Chip> : textoDias(faltan)}
+                  </CeldaTabla>
+                </FilaTabla>
+              );
+            })}
+          </Tabla>
+          <p className={styles.detalle} style={{ marginTop: 8 }}>
+            {filas.length} {filas.length === 1 ? "producto" : "productos"}
+            {filas.length >= 500 ? " (las 500 compras más recientes: usa el buscador para ver otras)" : ""}. Para recibir la mercancía, abre su OC.
+          </p>
+        </>
       )}
     </>
   );
