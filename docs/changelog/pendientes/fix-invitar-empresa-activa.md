@@ -1,0 +1,1 @@
+- **2026-11-28** — fix: "Generar invitación" fallaba con "No se encontró tu empresa activa" cuando faltaba la cookie `empresa_actual` (la pantalla usaba la primera empresa como respaldo, la acción no). `app/panel/invitar/actions.ts` ahora usa el mismo respaldo. Causa confirmada en los logs de Railway.
