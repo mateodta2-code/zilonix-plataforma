@@ -254,7 +254,7 @@ export async function crearYPublicarProductoAction(formData: FormData): Promise<
   // sigue existiendo (nunca se borró) para quien tenga ese link viejo
   // guardado — "ver detalle" en la tabla del historial sigue
   // enlazando ahí.
-  redirect(cuentasSeleccionadas.length > 0 ? `/panel/publicar#historial` : `/panel/publicar#historial-falabella`);
+  redirect(`/panel/publicar#historial`);
 }
 
 // Punto 8 del pedido de Mateo — "Borrar (🗑): confirma y borra SOLO la
