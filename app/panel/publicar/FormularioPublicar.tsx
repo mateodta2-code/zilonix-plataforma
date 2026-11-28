@@ -577,7 +577,7 @@ export function FormularioPublicar({
       </Tarjeta>
 
       {/* --- Características de la categoría en Falabella (mismo lugar que las de Mercado Libre) --- */}
-      {falabellaMarcadas.length > 0 && <SeccionFalabella cuentaId={falabellaMarcadas[0].id} sku={sku} />}
+      {falabellaMarcadas.length > 0 && <SeccionFalabella cuentaId={falabellaMarcadas[0].id} sku={sku} titulo={datosPorCuenta[falabellaMarcadas[0].id]?.titulo || tituloReferencia} />}
 
       {/* --- Punto 7: modo prueba + publicar --- */}
       <Tarjeta className={styles.seccion}>
