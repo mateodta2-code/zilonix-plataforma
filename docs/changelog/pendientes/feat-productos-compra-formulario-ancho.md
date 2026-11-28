@@ -1,0 +1,1 @@
+- Registro de compras: el formulario «Agregar compra» ocupa todo el cuadro en una cuadrícula de 6 columnas y 3 líneas (2 columnas en celular).

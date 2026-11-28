@@ -38,7 +38,10 @@ export function FormularioCompra({ accion, skus, bodegas, proveedores, formasPag
     <form action={accion} className={styles.form}>
       <input type="hidden" name="productoModo" value={modo} />
 
-      <div className={styles.filaForm}>
+      {/* 27-nov: cuadrícula de 6 columnas que ocupa todo el cuadro, en 3
+          líneas (pedido del usuario); en celular, 2 columnas. */}
+      <div className={styles.gridCompra}>
+        {/* Línea 1: fecha, producto, SKU, cantidad y valor. */}
         <Campo etiqueta="Fecha de compra">
           <input type="date" name="fechaCompra" defaultValue={hoy} required className="zx-control" />
         </Campo>
@@ -49,58 +52,63 @@ export function FormularioCompra({ accion, skus, bodegas, proveedores, formasPag
           </select>
         </Campo>
         {modo === "existente" ? (
-          <Campo etiqueta="SKU">
-            <select name="skuId" required className="zx-control" defaultValue="">
-              <option value="" disabled>
-                Elige el SKU…
-              </option>
-              {skus.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.codigo} — {s.nombre}
+          <div className={styles.span2}>
+            <Campo etiqueta="SKU">
+              <select name="skuId" required className="zx-control" defaultValue="">
+                <option value="" disabled>
+                  Elige el SKU…
                 </option>
-              ))}
-            </select>
-          </Campo>
+                {skus.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.codigo} — {s.nombre}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          </div>
         ) : (
           <>
             <Campo etiqueta="Nombre del producto">
               <input name="nombreNuevo" value={nombre} onChange={(e) => cambiarNombre(e.target.value)} required minLength={2} maxLength={200} className="zx-control" />
             </Campo>
             <Campo etiqueta="SKU (sugerido, editable)">
-              <input
-                name="skuNuevo"
-                value={sku}
-                onChange={(e) => {
-                  setSkuEditado(true);
-                  setSku(e.target.value.toUpperCase());
-                }}
-                required
-                pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,39}"
-                title="De 3 a 40 letras, números o guiones, sin espacios."
-                className="zx-control"
-              />
+              <div className={styles.skuConBoton}>
+                <input
+                  name="skuNuevo"
+                  value={sku}
+                  onChange={(e) => {
+                    setSkuEditado(true);
+                    setSku(e.target.value.toUpperCase());
+                  }}
+                  required
+                  pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,39}"
+                  title="De 3 a 40 letras, números o guiones, sin espacios."
+                  className="zx-control"
+                />
+                <Boton
+                  type="button"
+                  variante="fantasma"
+                  chico
+                  title="Sugerir otro SKU"
+                  onClick={() => {
+                    setSkuEditado(false);
+                    setSku(nombre.trim() === "" ? "" : sugerirCodigoSku(nombre));
+                  }}
+                >
+                  Otro
+                </Boton>
+              </div>
             </Campo>
-            <Boton
-              type="button"
-              variante="fantasma"
-              onClick={() => {
-                setSkuEditado(false);
-                setSku(nombre.trim() === "" ? "" : sugerirCodigoSku(nombre));
-              }}
-            >
-              Otro SKU
-            </Boton>
           </>
         )}
-      </div>
-
-      <div className={styles.filaForm}>
         <Campo etiqueta="Cantidad">
           <input name="cantidad" type="number" min={1} step={1} required className="zx-control" />
         </Campo>
         <Campo etiqueta="Valor unidad">
           <input name="valorUnidad" inputMode="decimal" placeholder="Ej. 36252" className="zx-control" />
         </Campo>
+
+        {/* Línea 2: pago, plataforma, orden, link y entrega. */}
         <Campo etiqueta="Forma de pago">
           <input name="formaPago" list="formas-pago-compra" maxLength={60} placeholder="Elige o escribe" className="zx-control" />
           <datalist id="formas-pago-compra">
@@ -117,21 +125,19 @@ export function FormularioCompra({ accion, skus, bodegas, proveedores, formasPag
             ))}
           </datalist>
         </Campo>
-      </div>
-
-      <div className={styles.filaForm}>
-        <Campo etiqueta="Orden de compra (de la plataforma)">
+        <Campo etiqueta="Orden de compra (plataforma)">
           <input name="ordenPlataforma" maxLength={80} placeholder="Ej. 114-1234567-1234567" className="zx-control" />
         </Campo>
-        <Campo etiqueta="Link de compra">
-          <input name="linkCompra" type="url" maxLength={500} placeholder="https://…" className="zx-control" />
-        </Campo>
+        <div className={styles.span2}>
+          <Campo etiqueta="Link de compra">
+            <input name="linkCompra" type="url" maxLength={500} placeholder="https://…" className="zx-control" />
+          </Campo>
+        </div>
         <Campo etiqueta="Entrega estimada">
           <input name="entregaEstimada" type="date" className="zx-control" />
         </Campo>
-      </div>
 
-      <div className={styles.filaForm}>
+        {/* Línea 3: bodega, proveedor, nota y el botón. */}
         <Campo etiqueta="Bodega de destino">
           <select name="bodegaDestinoId" required className="zx-control" defaultValue={bodegas.find((b) => b.esPrincipal)?.id ?? bodegas[0]?.id}>
             {bodegas.map((b) => (
@@ -141,7 +147,7 @@ export function FormularioCompra({ accion, skus, bodegas, proveedores, formasPag
             ))}
           </select>
         </Campo>
-        {proveedores.length > 0 && (
+        {proveedores.length > 0 ? (
           <Campo etiqueta="Proveedor (opcional)">
             <select name="terceroId" className="zx-control" defaultValue="">
               <option value="">Sin proveedor</option>
@@ -152,15 +158,18 @@ export function FormularioCompra({ accion, skus, bodegas, proveedores, formasPag
               ))}
             </select>
           </Campo>
+        ) : (
+          <div aria-hidden="true" />
         )}
-        <Campo etiqueta="Nota (opcional)">
-          <input name="nota" maxLength={200} className="zx-control" />
-        </Campo>
+        <div className={styles.span3}>
+          <Campo etiqueta="Nota (opcional)">
+            <input name="nota" maxLength={200} className="zx-control" />
+          </Campo>
+        </div>
+        <div className={styles.celdaBoton}>
+          <Boton type="submit">Agregar compra</Boton>
+        </div>
       </div>
-
-      <Boton type="submit" className={styles.botonCrear}>
-        Agregar compra
-      </Boton>
     </form>
   );
 }
