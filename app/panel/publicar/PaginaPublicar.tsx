@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Tarjeta } from "@/components/marco/Tarjeta";
+import { Pestanas } from "@/components/marco/Pestanas";
 import { FormularioPublicar } from "./FormularioPublicar";
 import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
@@ -90,10 +91,13 @@ export function PaginaPublicar({
     return prefillNuevo.titulo || prefillNuevo.precio || prefillNuevo.foto ? estadoInicialDesdePrefill(cuentas, prefillNuevo) : estadoInicialVacio();
   });
   const [formKey, setFormKey] = useState(0);
+  // Subpestañas locales (no cambian de ruta): todo sigue montado para no perder el formulario.
+  const [pestana, setPestana] = useState<"publicar" | "imagenes">("publicar");
 
   function cargarEnFormulario(producto: ProductoHistorial, modo: "reintentar" | "duplicar") {
     setFormInicial(construirEstadoInicial(producto, modo));
     setFormKey((k) => k + 1);
+    setPestana("publicar");
     document.getElementById("formulario-publicar")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -105,6 +109,7 @@ export function PaginaPublicar({
   function importarEnFormulario(item: ItemImportado) {
     setFormInicial(construirEstadoInicialDesdeImportacion(cuentas.map((c) => c.id), item));
     setFormKey((k) => k + 1);
+    setPestana("publicar");
     document.getElementById("formulario-publicar")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -144,6 +149,13 @@ export function PaginaPublicar({
 
   return (
     <>
+      <Pestanas
+        pestanas={[
+          { etiqueta: "Publicar", href: "#publicar", activa: pestana === "publicar", onSeleccionar: () => setPestana("publicar") },
+          { etiqueta: "Generación de imágenes", href: "#imagenes", activa: pestana === "imagenes", onSeleccionar: () => setPestana("imagenes") },
+        ]}
+      />
+      <div hidden={pestana !== "publicar"}>
       {/* --- Punto 1: aviso fijo --- */}
       <Tarjeta className={styles.seccion}>
         <p style={{ fontSize: 14, margin: 0 }}>
@@ -164,17 +176,21 @@ export function PaginaPublicar({
         />
       </Tarjeta>
 
+      </div>
+
       {/* --- Puntos 3-7: el formulario (cuentas, datos, por cuenta, categoría, publicar) --- */}
       <FormularioPublicar
         key={formKey}
         cuentas={cuentas}
         cuentasFalabella={cuentasFalabella}
+        pestana={pestana}
         inicial={formInicial}
         cloudinaryConfigurado={cloudinaryConfigurado}
         canva={canva}
         canvaCodigo={canvaCodigo}
       />
 
+      <div hidden={pestana !== "publicar"}>
       <HistorialFalabella publicaciones={historialFalabella} />
 
       {/* --- Punto 8: historial (y, Parte 3 punto B, el permalink real por cuenta) --- */}
@@ -184,6 +200,7 @@ export function PaginaPublicar({
         onCargar={(p) => cargarEnFormulario(p, "reintentar")}
         onDuplicar={(p) => cargarEnFormulario(p, "duplicar")}
       />
+      </div>
     </>
   );
 }

@@ -53,6 +53,7 @@ type RespuestaCaracteristicas = {
 export function FormularioPublicar({
   cuentas,
   cuentasFalabella,
+  pestana,
   inicial,
   cloudinaryConfigurado,
   canva,
@@ -62,6 +63,10 @@ export function FormularioPublicar({
   // Cuentas de Falabella conectadas: van en «Cuentas destino» como otro grupo,
   // pero nunca entran a las secciones por cuenta de Mercado Libre.
   cuentasFalabella: Cuenta[];
+  // Subpestaña activa (la elige PaginaPublicar). Las dos vistas quedan
+  // montadas siempre — solo se ocultan — para no perder lo escrito ni lo
+  // generado al cambiar de una a otra, y para que todo viaje en el mismo envío.
+  pestana: "publicar" | "imagenes";
   inicial: EstadoInicialFormulario;
   cloudinaryConfigurado: boolean;
   canva: string;
@@ -274,6 +279,7 @@ export function FormularioPublicar({
 
   return (
     <form id="formulario-publicar" action={crearYPublicarProductoAction} onSubmit={onSubmit}>
+      <div hidden={pestana !== "publicar"}>
       {/* --- Primer paso visible: conectar Canva (antes vivía dentro de
       GaleriaFotos.tsx, debajo de las miniaturas — se mueve arriba
       porque resuelve de dónde van a salir las fotos antes de armar el
@@ -384,6 +390,9 @@ export function FormularioPublicar({
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
 
+      </div>
+
+      <div hidden={pestana !== "imagenes"}>
       {/* --- «Generación de imágenes para Meli» (antes «Crear con IA», 23-nov):
           imágenes de referencia (solo para la IA), información y 1. ficha
           arriba; debajo, sub pestañas Generar imágenes / Títulos /
@@ -391,6 +400,11 @@ export function FormularioPublicar({
           de abajo y las imágenes entran a la galería de arriba. --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Generación de imágenes para Meli</p>
+        {cuentasMarcadas.length === 0 && (
+          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
+            Para usar un título, descripción o portada generados, primero elige las cuentas destino en la pestaña Publicar.
+          </p>
+        )}
         <CrearConIA
           key={reinicioIA}
           cuentas={cuentasMarcadas}
@@ -418,7 +432,9 @@ export function FormularioPublicar({
           }
         />
       </Tarjeta>
+      </div>
 
+      <div hidden={pestana !== "publicar"}>
       {/* --- Punto 5: título/descripción/portada por cuenta ELEGIDA --- */}
       <Tarjeta className={styles.seccion}>
         <div className={styles.filaAccion}>
@@ -531,10 +547,11 @@ export function FormularioPublicar({
           <span>Modo prueba — publicar pausado (se crea de verdad pero nunca queda visible al público, para poder probarlo y borrarlo después)</span>
         </label>
 
-        <Boton type="submit" variante="primario" disabled={cuentasMarcadas.length === 0}>
-          Publicar en {cuentasMarcadas.length} cuenta{cuentasMarcadas.length === 1 ? "" : "s"}
+        <Boton type="submit" variante="primario" disabled={cuentasMarcadas.length + falabellaMarcadas.length === 0}>
+          Publicar en {cuentasMarcadas.length + falabellaMarcadas.length} cuenta{cuentasMarcadas.length + falabellaMarcadas.length === 1 ? "" : "s"}
         </Boton>
       </Tarjeta>
+      </div>
     </form>
   );
 }
