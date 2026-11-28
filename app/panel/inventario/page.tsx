@@ -6,13 +6,12 @@ import { tienePermiso } from "@/lib/roles";
 import { normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarBodegas } from "@/lib/inventario/bodegas";
 import { instruccionAlerta, listarAlertasPendientes } from "@/lib/inventario/alertas";
-import { leerConfiguracionInventario } from "@/lib/inventario/configuracion";
-import { calcularDiasStock, cantidadAPublicar, textoDiasStock } from "@/lib/inventario/calculos";
-import { listarInventario, listarSkusConStock, TAMANO_PAGINA_INVENTARIO } from "@/lib/inventario/stock";
+import { listarSkusConStock } from "@/lib/inventario/stock";
+import { claveFilaInventario, listarInventarioPorBodega, TAMANO_PAGINA_INVENTARIO_BODEGA } from "@/lib/inventario/vista-inventario";
 import { leerFichasProducto, type FichaProducto } from "@/lib/inventario/ficha-producto";
 import { urlFotoGrandeMl } from "@/lib/ml/imagen-ml";
 import { formatearMonto } from "@/lib/panel-kpis";
-import { ajustarStockAction, resolverAlertaAction, trasladarStockAction } from "./actions";
+import { resolverAlertaAction, trasladarStockAction } from "./actions";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
@@ -24,13 +23,17 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
 import styles from "./inventario.module.css";
 import { SkuCopiable } from "@/components/marco/SkuCopiable";
-import { FotoConZoom } from "@/components/marco/FotoConZoom";
+import { FotoInventario } from "@/components/inventario/FotoInventario";
+import { AccionesFilaInventario } from "@/components/inventario/AccionesFilaInventario";
 
 // Issue #280 — stock por SKU y bodega (WMS Fase 1). Seller es la fuente
 // de verdad: lo que se ve acá es lo que se publica en ML (menos el
 // colchón), no lo que diga Fulfy. Ver pide inventario.consultar;
-// ajustar, trasladar y resolver la alerta de última unidad,
-// inventario.modificar (también en cada acción).
+// trasladar, Modificar (ingreso/salida y datos) y resolver la alerta de
+// última unidad, inventario.modificar (también en cada acción). Una
+// fila por SKU+bodega, como el inventario de Zilonix OS. El cuadro
+// «Ajuste» salió de esta vista (Franky, 28-nov); ajustarStockAction
+// sigue en actions.ts.
 export default async function InventarioPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const { usuario, activa, permisos, rolNombre } = await obtenerContextoPanel();
   try {
@@ -43,32 +46,31 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
   // Costo, venta y proveedor son de finanzas (mismo criterio que
   // Registro de compras): sin finanzas.consultar esas columnas no salen.
   const veFinanzas = tienePermiso(permisos, "finanzas", "consultar");
+  // Cambiar costo/precio: el mismo permiso que la maestra de Finanzas.
+  const cambiaFinanzas = veFinanzas && tienePermiso(permisos, "finanzas", "modificar");
   const q = normalizarParametro(searchParams.q);
 
-  const [resultado, lista, alertas, config, skusSimples] = await Promise.all([
-    listarInventario(activa.id, { busqueda: q, pagina: parsearPagina(normalizarParametro(searchParams.pagina)) }),
+  const [resultado, lista, alertas, skusSimples] = await Promise.all([
+    listarInventarioPorBodega(activa.id, { busqueda: q, pagina: parsearPagina(normalizarParametro(searchParams.pagina)) }),
     listarBodegas(activa.id),
     listarAlertasPendientes(activa.id),
-    leerConfiguracionInventario(activa.id),
     puedeMover ? listarSkusConStock(activa.id) : Promise.resolve([]),
   ]);
-  // Solo los SKU de esta página, nunca toda la empresa.
-  const fichas = await leerFichasProducto(
-    activa.id,
-    resultado.filas.map((f) => ({ id: f.skuId, codigo: f.codigo }))
-  );
+  // Solo los SKU (únicos) de esta página, nunca toda la empresa.
+  const unicos = new Map(resultado.filas.map((f) => [f.skuId, { id: f.skuId, codigo: f.codigo }]));
+  const fichas = await leerFichasProducto(activa.id, [...unicos.values()]);
   const activas = lista.filter((b) => b.activa);
-  // Las columnas son las bodegas activas más las desactivadas que
-  // todavía tienen algo (para no esconder stock real).
-  const conSaldo = new Set(resultado.filas.flatMap((f) => f.porBodega.filter((b) => b.disponible || b.reservado).map((b) => b.bodegaId)));
-  const columnas = lista.filter((b) => b.activa || conSaldo.has(b.id));
+  const bodegasModal = activas.map((b) => ({ id: b.id, nombre: b.nombre, esPrincipal: b.esPrincipal }));
+  // Traslado «Desde»: activas más las desactivadas que todavía tienen
+  // algo en esta página (las filas ya traen solo esas).
+  const conSaldo = new Set(resultado.filas.map((f) => f.bodegaId).filter((id): id is string => id !== null));
   const hrefPagina = (p: number) => `/panel/inventario?${new URLSearchParams({ ...(q ? { q } : {}), ...(p > 1 ? { pagina: String(p) } : {}) })}`;
 
   return (
     <>
       <EncabezadoPagina
         titulo="Inventario"
-        descripcion={`Stock por bodega. "Para ML" es lo que se publica: disponible de las bodegas que suman, menos un colchón de ${config.bufferMl}. "Días de stock" es para cuántos días alcanza, según lo vendido en ML en los últimos 30 días.`}
+        descripcion="Stock disponible por SKU y bodega. Costo, venta y proveedor. Desde Acciones puedes ver el historial o modificar el producto."
       />
       <AvisosUrl searchParams={searchParams} />
 
@@ -104,30 +106,9 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
         </div>
       )}
 
-      {puedeMover && activas.length > 0 && skusSimples.length > 0 && (
+      {/* Solo queda el Traslado (el Ajuste salió de esta vista). */}
+      {puedeMover && activas.length > 1 && skusSimples.length > 0 && (
         <div className={styles.gridForms}>
-          <Tarjeta>
-            <h2 className={styles.tituloSeccion}>Ajuste</h2>
-            <form action={ajustarStockAction} className={styles.form}>
-              <input type="hidden" name="operacionId" value={randomUUID()} />
-              <Campo etiqueta="SKU">
-                <SelectorSku skus={skusSimples} />
-              </Campo>
-              <Campo etiqueta="Bodega">
-                <SelectorBodega nombre="bodegaId" bodegas={activas} />
-              </Campo>
-              <Campo etiqueta="Cantidad (+ sobra, − falta)">
-                <input name="cantidad" type="number" step={1} required className="zx-control" />
-              </Campo>
-              <Campo etiqueta="Motivo">
-                <input name="nota" required maxLength={200} placeholder="Conteo, daño, pérdida…" className="zx-control" />
-              </Campo>
-              <Boton type="submit" className={styles.botonCrear}>
-                Registrar ajuste
-              </Boton>
-            </form>
-          </Tarjeta>
-          {activas.length > 1 && (
             <Tarjeta>
               <h2 className={styles.tituloSeccion}>Traslado</h2>
               <form action={trasladarStockAction} className={styles.form}>
@@ -152,7 +133,6 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
                 </Boton>
               </form>
             </Tarjeta>
-          )}
         </div>
       )}
 
@@ -187,10 +167,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
               "SKU",
               ...(veFinanzas ? ["Costo", "Venta"] : []),
               "Stock",
-              ...columnas.map((b) => b.nombre),
-              "Reservado",
-              "Para ML",
-              "Días de stock",
+              "Bodega",
               ...(veFinanzas ? ["Proveedor"] : []),
               "Acciones",
             ]}
@@ -198,7 +175,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
             {resultado.filas.map((f) => {
               const ficha = fichas.get(f.skuId);
               return (
-                <FilaTabla key={f.skuId}>
+                <FilaTabla key={claveFilaInventario(f)}>
                   <CeldaTabla>
                     <Foto ficha={ficha} nombre={f.nombre} />
                   </CeldaTabla>
@@ -214,32 +191,25 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
                       <CeldaTabla className={styles.numero}>{montoOGuion(ficha?.precioVenta ?? null)}</CeldaTabla>
                     </>
                   )}
-                  <CeldaTabla className={styles.numero}>{f.esKit ? "—" : f.totalDisponible}</CeldaTabla>
-                  {columnas.map((b) => {
-                    const saldo = f.porBodega.find((x) => x.bodegaId === b.id);
-                    return (
-                      <CeldaTabla key={b.id} className={styles.numero}>
-                        {f.esKit ? "—" : (saldo?.disponible ?? 0)}
-                      </CeldaTabla>
-                    );
-                  })}
-                  <CeldaTabla className={styles.numero}>{f.esKit ? "—" : f.totalReservado}</CeldaTabla>
-                  <CeldaTabla className={styles.numero}>
-                    <strong>{cantidadAPublicar(f.publicable, config.bufferMl)}</strong>
-                  </CeldaTabla>
-                  <CeldaTabla className={styles.numero}>
-                    <DiasStock esKit={f.esKit} paraMl={cantidadAPublicar(f.publicable, config.bufferMl)} vendidas30={f.vendidas30} />
-                  </CeldaTabla>
+                  {/* Disponible de ESA bodega; un kit no tiene saldo propio. */}
+                  <CeldaTabla className={styles.numero}>{f.disponible ?? "—"}</CeldaTabla>
+                  <CeldaTabla>{f.bodegaNombre ?? "—"}</CeldaTabla>
                   {veFinanzas && <CeldaTabla>{ficha?.proveedorNombre ?? "—"}</CeldaTabla>}
                   <CeldaTabla>
-                    {/* Acá entra después el botón «Modificar» (otra tarea). */}
-                    <div className={styles.accionesFila}>
-                      {!f.esKit && (
-                        <BotonLink href={`/panel/inventario/kardex?sku=${f.skuId}`} variante="secundario" chico>
-                          Historial ingresos
-                        </BotonLink>
-                      )}
-                    </div>
+                    <AccionesFilaInventario
+                      claseContenedor={styles.accionesFila}
+                      skuId={f.skuId}
+                      codigo={f.codigo}
+                      nombre={f.nombre}
+                      esKit={f.esKit}
+                      bodegaId={f.bodegaId}
+                      bodegas={bodegasModal}
+                      costo={veFinanzas ? (ficha?.costo ?? null) : null}
+                      precioVenta={veFinanzas ? (ficha?.precioVenta ?? null) : null}
+                      puedeModificar={puedeMover}
+                      veCostos={veFinanzas}
+                      cambiaCostos={cambiaFinanzas}
+                    />
                   </CeldaTabla>
                 </FilaTabla>
               );
@@ -247,7 +217,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
           </Tabla>
           <div className={styles.paginacion}>
             <p className={styles.resumenPaginacion}>
-              Página {resultado.pagina} de {resultado.totalPaginas} · {resultado.total} SKU · {TAMANO_PAGINA_INVENTARIO} por página
+              Página {resultado.pagina} de {resultado.totalPaginas} · {resultado.total} fila(s) · {TAMANO_PAGINA_INVENTARIO_BODEGA} por página
             </p>
             <div className={styles.botonesPaginacion}>
               {resultado.pagina > 1 && (
@@ -279,15 +249,7 @@ function Foto({ ficha, nombre }: { ficha: FichaProducto | undefined; nombre: str
   if (!ficha?.fotoUrl) {
     return <div className={`${styles.miniatura} ${styles.miniaturaVacia} ${styles.detalle}`}>Sin foto</div>;
   }
-  return <FotoConZoom src={ficha.fotoUrl} srcAmpliada={urlFotoGrandeMl(ficha.fotoUrl)} alt={nombre} claseMiniatura={styles.miniatura} />;
-}
-
-// Un kit no tiene ritmo propio: sus ventas ya suman a los componentes.
-function DiasStock({ esKit, paraMl, vendidas30 }: { esKit: boolean; paraMl: number; vendidas30: number }) {
-  if (esKit) return <>—</>;
-  const dias = calcularDiasStock(paraMl, vendidas30);
-  if (dias === null) return <span className={styles.detalle}>{textoDiasStock(dias)}</span>;
-  return <span title={`${vendidas30} vendida(s) en ML en los últimos 30 días (sin Full ni canceladas)`}>{textoDiasStock(dias)}</span>;
+  return <FotoInventario src={ficha.fotoUrl} srcAmpliada={urlFotoGrandeMl(ficha.fotoUrl)} alt={nombre} claseMiniatura={styles.miniatura} />;
 }
 
 function SelectorSku({ skus }: { skus: { id: string; codigo: string; nombre: string }[] }) {
