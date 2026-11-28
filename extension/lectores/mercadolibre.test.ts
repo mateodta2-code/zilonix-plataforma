@@ -1319,3 +1319,44 @@ describe("leerMonedaDePagina — multipaís (issue #520)", () => {
     expect(leerMonedaDePagina({ URL: "https://articulo.mercadolibre.com.co/x" }, ld("x"))).toBe("COP");
   });
 });
+
+import { elegirVendedor, limpiarNombreTienda } from "./mercadolibre.js";
+
+describe("elegirVendedor — tienda del vendedor en la ficha (nombre + link)", () => {
+  const URL_FICHA = "https://www.mercadolibre.com.co/lampara-led/up/MCOU123";
+  it("toma el link de la tienda dentro del bloque del vendedor y limpia «Vendido por»", () => {
+    const r = elegirVendedor(
+      [
+        { href: "/tienda/otra-cosa", texto: "Ver más de esta tienda", enSeller: false },
+        { href: "https://www.mercadolibre.com.co/perfil/DIRECTOACASABOG", texto: "Vendido por DIRECTOACASABOG", enSeller: true },
+      ],
+      "",
+      URL_FICHA
+    );
+    expect(r).toEqual({ nombre: "DIRECTOACASABOG", link: "https://www.mercadolibre.com.co/perfil/DIRECTOACASABOG" });
+  });
+  it("resuelve un link relativo contra la página", () => {
+    const r = elegirVendedor([{ href: "/tienda/herramientas-sas", texto: "HERRAMIENTAS SAS", enSeller: true }], "", URL_FICHA);
+    expect(r).toEqual({ nombre: "HERRAMIENTAS SAS", link: "https://www.mercadolibre.com.co/tienda/herramientas-sas" });
+  });
+  it("sin nombre en el link usa el nickname del JSON incrustado, conservando el link", () => {
+    const html = '{"seller":{"id":99,"nickname":"TECNOHOGAR JS"}}';
+    const r = elegirVendedor([{ href: "/perfil/TECNOHOGAR+JS", texto: "Ir a la tienda", enSeller: true }], html, URL_FICHA);
+    expect(r.nombre).toBe("TECNOHOGAR JS");
+    expect(r.link).toBe("https://www.mercadolibre.com.co/perfil/TECNOHOGAR+JS");
+  });
+  it("sin ningún link usa seller_id para armar el listado del vendedor, sin nombre inventado", () => {
+    const r = elegirVendedor([], '..."seller_id":123456...', URL_FICHA);
+    expect(r).toEqual({ nombre: null, link: "https://listado.mercadolibre.com.co/_CustId_123456" });
+  });
+  it("descarta links que no son de Mercado Libre o no son https; sin datos todo es null", () => {
+    expect(elegirVendedor([{ href: "https://evil.com/tienda/x", texto: "X", enSeller: true }, { href: "http://www.mercadolibre.com.co/tienda/x", texto: "X", enSeller: true }], "", URL_FICHA)).toEqual({ nombre: null, link: null });
+    expect(elegirVendedor([], "", URL_FICHA)).toEqual({ nombre: null, link: null });
+  });
+  it("limpiarNombreTienda rechaza textos de botón y nombres vacíos o larguísimos", () => {
+    expect(limpiarNombreTienda("Vendido por  ACME  SA")).toBe("ACME SA");
+    expect(limpiarNombreTienda("Visitar tienda oficial")).toBeNull();
+    expect(limpiarNombreTienda("")).toBeNull();
+    expect(limpiarNombreTienda("x".repeat(120))).toBeNull();
+  });
+});

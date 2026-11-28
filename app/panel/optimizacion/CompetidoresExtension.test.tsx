@@ -23,10 +23,10 @@ function guardado(extra: Record<string, unknown> = {}) {
         link: "https://articulo.mercadolibre.com.co/MCO-111111111-lampara-_JM",
         titulo: "Lámpara Led Con Sensor",
         foto: "https://http2.mlstatic.com/D_NQ_NP_123-V.webp",
-        vendedor: "DIRECTOACASABOG",
+        vendedor: "DIRECTOACASABOG", vendedorLink: "https://www.mercadolibre.com.co/perfil/DIRECTOACASABOG",
         precio: 25757, precioAnterior: null, descuentoPorcentaje: null, vendidos: 1000, vendidosExacto: false, calificacion: 4.6, numeroOpiniones: 157,
         esCatalogo: false, full: true, envioGratis: true, inventario: 50, inventarioAproximado: true, fotos: 8, descripcion: true,
-        vendidosEstimados: null, antiguedadDias: 400, ventasMes: 80, facturacionMes: 2000000, leidoDeFicha: true, manual: false, actualizadoTs: "2026-11-28T14:00:00.000Z",
+        vendidosEstimados: null, antiguedadDias: 400, ventasMes: 80, facturacionMes: 2000000, leidoDeFicha: true, manual: false, actualizadoTs: "2026-11-28T14:00:00.000Z", cambios: [], cambiosDesdeTs: null,
         ...extra,
       },
     ],
@@ -136,5 +136,41 @@ describe("CompetidoresExtension", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("la tienda es un link a la tienda del competidor", async () => {
+    guardadosMock.mockResolvedValue({ ok: true, guardado: guardado() });
+    montar();
+    await act(async () => {});
+    const link = screen.getByRole("link", { name: "DIRECTOACASABOG" });
+    expect(link.getAttribute("href")).toBe("https://www.mercadolibre.com.co/perfil/DIRECTOACASABOG");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("muestra qué cambió en la última actualización: resumen y por competidor", async () => {
+    guardadosMock.mockResolvedValue({
+      ok: true,
+      guardado: guardado({
+        cambiosDesdeTs: "2026-11-27T10:00:00.000Z",
+        cambios: [
+          { campo: "precio", antes: 30000, despues: 25757 },
+          { campo: "full", antes: false, despues: true },
+          { campo: "inventario", antes: 80, despues: 50 },
+        ],
+      }),
+    });
+    montar();
+    await act(async () => {});
+    expect(screen.getByText(/Qué cambió en la última actualización \(1 de 1\)/)).toBeTruthy();
+    expect(screen.getAllByText(/Bajó el precio/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Entró a Full/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Bajó el inventario/).length).toBeGreaterThan(0);
+  });
+
+  it("si nada cambió lo dice", async () => {
+    guardadosMock.mockResolvedValue({ ok: true, guardado: guardado({ cambiosDesdeTs: "2026-11-27T10:00:00.000Z", cambios: [] }) });
+    montar();
+    await act(async () => {});
+    expect(screen.getByText("Ningún competidor cambió en la última actualización.")).toBeTruthy();
   });
 });

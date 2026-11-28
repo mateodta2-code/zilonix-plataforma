@@ -710,3 +710,37 @@
   font-size: 11px;
   color: var(--texto-suave);
 }
+
+/* Qué cambió en un competidor desde la lectura anterior. */
+.cambios {
+  margin: 4px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--texto);
+}
+
+.resumenCambios {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  background: var(--acento-suave);
+  border-radius: var(--radio-boton);
+}
+
+.resumenCambios ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.resumenCambios ul ul {
+  list-style: none;
+  padding-left: 4px;
+  font-weight: 600;
+}

@@ -133,6 +133,7 @@ describe("término, país y antigüedad", () => {
 });
 
 import {
+  compararCompetidores,
   esLinkCompetidorValido,
   esperaMaximaMs,
   fotoGrande,
@@ -140,6 +141,7 @@ import {
   nivelParecido,
   parecidoTitulos,
   quitarCompetidor,
+  textoCambio,
   validarCompetidores,
   type CompetidorExtension,
 } from "@/lib/optimizacion/competidoresExtension";
@@ -233,5 +235,70 @@ describe("fusionar, quitar y validar links", () => {
     expect(fotoGrande("https://http2.mlstatic.com/D_NQ_NP_123-V.webp")).toBe("https://http2.mlstatic.com/D_NQ_NP_123-O.webp");
     expect(fotoGrande("https://evil.com/a-V.webp")).toBe("https://evil.com/a-V.webp");
     expect(esperaMaximaMs(10)).toBeGreaterThan(esperaMaximaMs(1));
+  });
+});
+
+describe("qué cambió en una actualización", () => {
+  const AHORA = "2026-11-28T15:00:00.000Z";
+  const ANTES = "2026-11-27T10:00:00.000Z";
+  const base = (extra: Partial<CompetidorExtension> = {}) =>
+    comp(1, { actualizadoTs: ANTES, precio: 100000, inventario: 50, inventarioAproximado: true, esCatalogo: false, full: false, envioGratis: false, ventasMes: 100, facturacionMes: 10000000, ...extra });
+  const f = { plata: (n: number) => "$" + n, num: (n: number) => String(n) };
+
+  it("detecta precio, inventario, catálogo, Full, envío gratis, ventas y facturación", () => {
+    const despues = base({ precio: 90000, inventario: 30, esCatalogo: true, full: true, envioGratis: true, ventasMes: 150, facturacionMes: 13500000 });
+    const c = compararCompetidores(base(), despues);
+    expect(c.map((x) => x.campo)).toEqual(["precio", "inventario", "esCatalogo", "full", "envioGratis", "ventasMes", "facturacionMes"]);
+    expect(c.find((x) => x.campo === "precio")).toEqual({ campo: "precio", antes: 100000, despues: 90000 });
+  });
+  it("sin cambios no devuelve nada", () => {
+    expect(compararCompetidores(base(), base())).toEqual([]);
+  });
+  it("no compara si una de las lecturas es solo del listado, ni un dato que falta en una", () => {
+    expect(compararCompetidores(base({ leidoDeFicha: false }), base({ precio: 1 }))).toEqual([]);
+    expect(compararCompetidores(base({ full: null }), base({ full: true })).some((x) => x.campo === "full")).toBe(false);
+  });
+  it("inventario con «+» (mínimo) no se compara con una cantidad exacta", () => {
+    expect(compararCompetidores(base({ inventarioAproximado: true }), base({ inventario: 5, inventarioAproximado: false })).some((x) => x.campo === "inventario")).toBe(false);
+  });
+  it("los estimados solo avisan desde un 5 % de cambio", () => {
+    expect(compararCompetidores(base(), base({ ventasMes: 98, facturacionMes: 9800000 }))).toEqual([]);
+    expect(compararCompetidores(base(), base({ ventasMes: 90 })).map((x) => x.campo)).toEqual(["ventasMes"]);
+  });
+  it("al actualizar, deja los cambios y la fecha de la lectura anterior en el competidor", () => {
+    const nuevo = comp(1, { precio: 90000, inventario: 50, inventarioAproximado: true, esCatalogo: false, full: false, envioGratis: false, ventasMes: 100, facturacionMes: 10000000 });
+    const { lista, conCambios } = fusionarCompetidores([base()], [nuevo], "links", AHORA);
+    expect(conCambios).toBe(1);
+    expect(lista[0].cambios).toEqual([{ campo: "precio", antes: 100000, despues: 90000 }]);
+    expect(lista[0].cambiosDesdeTs).toBe(ANTES);
+    expect(lista[0].actualizadoTs).toBe(AHORA);
+  });
+  it("una actualización sin cambios borra los cambios de la anterior; una ficha que falla los conserva", () => {
+    const conAntiguos = base({ cambios: [{ campo: "precio", antes: 1, despues: 2 }] });
+    const igual = comp(1, { precio: 100000, inventario: 50, inventarioAproximado: true, esCatalogo: false, full: false, envioGratis: false, ventasMes: 100, facturacionMes: 10000000 });
+    expect(fusionarCompetidores([conAntiguos], [igual], "links", AHORA).lista[0].cambios).toEqual([]);
+    const fallo = fusionarCompetidores([conAntiguos], [comp(1, { leidoDeFicha: false })], "links", AHORA).lista[0];
+    expect(fallo.cambios).toHaveLength(1);
+  });
+  it("los cambios guardados se revalidan (campo desconocido o tipo equivocado se descartan)", () => {
+    const m = leerMensajeCompetidores(
+      mensaje([{ ...COMPETIDOR, cambios: [{ campo: "precio", antes: 1, despues: 2 }, { campo: "hack", antes: 1, despues: 2 }, { campo: "full", antes: 1, despues: 2 }] }]),
+      PROPIA
+    );
+    expect(m?.tipo === "ok" && m.competidores[0].cambios).toEqual([{ campo: "precio", antes: 1, despues: 2 }]);
+  });
+  it("frases claras en español", () => {
+    expect(textoCambio({ campo: "precio", antes: 100000, despues: 90000 }, f)).toEqual({ icono: "▼", texto: "Bajó el precio: $100000 → $90000 (−10 %)" });
+    expect(textoCambio({ campo: "inventario", antes: 30, despues: 50 }, f).texto).toBe("Subió el inventario: 30 → 50");
+    expect(textoCambio({ campo: "esCatalogo", antes: false, despues: true }, f).texto).toBe("Entró al catálogo");
+    expect(textoCambio({ campo: "full", antes: true, despues: false }, f).texto).toBe("Salió de Full");
+    expect(textoCambio({ campo: "envioGratis", antes: true, despues: false }, f).texto).toBe("Quitó el envío gratis");
+    expect(textoCambio({ campo: "ventasMes", antes: 100, despues: 150 }, f).texto).toContain("Subieron las ventas/mes aprox.");
+  });
+  it("la tienda guarda su link y solo si es de Mercado Libre", () => {
+    const ok = leerMensajeCompetidores(mensaje([{ ...COMPETIDOR, vendedorLink: "https://www.mercadolibre.com.co/perfil/X" }]), PROPIA);
+    const mal = leerMensajeCompetidores(mensaje([{ ...COMPETIDOR, vendedorLink: "https://evil.com/perfil/X" }]), PROPIA);
+    expect(ok?.tipo === "ok" && ok.competidores[0].vendedorLink).toBe("https://www.mercadolibre.com.co/perfil/X");
+    expect(mal?.tipo === "ok" && mal.competidores[0].vendedorLink).toBeNull();
   });
 });

@@ -18,6 +18,8 @@ export type CompetidorExtension = {
   titulo: string | null;
   foto: string | null;
   vendedor: string | null;
+  // Link a la tienda del vendedor en Mercado Libre (para ir a verlo).
+  vendedorLink: string | null;
   precio: number | null;
   precioAnterior: number | null;
   descuentoPorcentaje: number | null;
@@ -44,7 +46,18 @@ export type CompetidorExtension = {
   manual: boolean;
   // Última vez que se leyó su ficha de verdad (ISO). null = nunca.
   actualizadoTs: string | null;
+  // Qué cambió en la última actualización frente a la lectura anterior
+  // (vacío = nada cambió o no hay lectura anterior comparable) y la
+  // fecha de esa lectura anterior.
+  cambios: CambioCompetidor[];
+  cambiosDesdeTs: string | null;
 };
+
+export type CampoCambio = "precio" | "inventario" | "esCatalogo" | "full" | "envioGratis" | "ventasMes" | "facturacionMes";
+export type CambioCompetidor = { campo: CampoCambio; antes: number | boolean; despues: number | boolean };
+
+const CAMPOS_NUMERICOS: readonly CampoCambio[] = ["precio", "inventario", "ventasMes", "facturacionMes"];
+const CAMPOS_BOOLEANOS: readonly CampoCambio[] = ["esCatalogo", "full", "envioGratis"];
 
 export type MensajeCompetidores =
   | { tipo: "ok"; itemId: string; termino: string; modo: "busqueda" | "links"; candidatos: number; competidores: CompetidorExtension[] }
@@ -96,6 +109,28 @@ function nombreTienda(valor: unknown): string | null {
   return limpio || null;
 }
 
+function cambiosValidos(valor: unknown): CambioCompetidor[] {
+  if (!Array.isArray(valor)) return [];
+  const salida: CambioCompetidor[] = [];
+  for (const c of valor.slice(0, 10)) {
+    if (!c || typeof c !== "object") continue;
+    const { campo, antes, despues } = c as Record<string, unknown>;
+    if (typeof campo !== "string") continue;
+    const esNum = (CAMPOS_NUMERICOS as readonly string[]).includes(campo);
+    const esBool = (CAMPOS_BOOLEANOS as readonly string[]).includes(campo);
+    if (esNum && typeof antes === "number" && typeof despues === "number" && Number.isFinite(antes) && Number.isFinite(despues)) {
+      salida.push({ campo: campo as CampoCambio, antes, despues });
+    } else if (esBool && typeof antes === "boolean" && typeof despues === "boolean") {
+      salida.push({ campo: campo as CampoCambio, antes, despues });
+    }
+  }
+  return salida;
+}
+
+function enlaceMl(valor: unknown): string | null {
+  return typeof valor === "string" && PATRON_LINK_ML.test(valor) ? valor.slice(0, 500) : null;
+}
+
 function booleano(valor: unknown): boolean | null {
   return typeof valor === "boolean" ? valor : null;
 }
@@ -121,6 +156,7 @@ function competidor(crudo: unknown): CompetidorExtension | null {
     titulo: texto(c.titulo),
     foto: esFotoMlValida(c.foto) ? c.foto : null,
     vendedor: nombreTienda(c.vendedor),
+    vendedorLink: enlaceMl(c.vendedorLink),
     precio: numero(c.precio),
     precioAnterior: numero(c.precioAnterior),
     descuentoPorcentaje: numero(c.descuentoPorcentaje),
@@ -142,6 +178,8 @@ function competidor(crudo: unknown): CompetidorExtension | null {
     leidoDeFicha: c.leidoDeFicha === true,
     manual: c.manual === true,
     actualizadoTs: fechaIso(c.actualizadoTs),
+    cambios: cambiosValidos(c.cambios),
+    cambiosDesdeTs: fechaIso(c.cambiosDesdeTs),
   };
 }
 
@@ -290,17 +328,81 @@ function mismoCompetidor(a: CompetidorExtension, b: CompetidorExtension): boolea
   return (a.itemId !== null && a.itemId === b.itemId) || a.link === b.link;
 }
 
-export type ResultadoFusion = { lista: CompetidorExtension[]; leidos: number; noLeidos: number };
+export type ResultadoFusion = { lista: CompetidorExtension[]; leidos: number; noLeidos: number; conCambios: number };
+
+// Los estimados (ventas/mes y facturación) se mueven un poco cada día
+// solo porque la publicación envejece; se avisan desde un 5 % de cambio.
+const UMBRAL_ESTIMADOS = 0.05;
+
+// Qué cambió entre dos lecturas de la MISMA ficha. Solo se compara si
+// las dos vienen de la ficha de verdad (con datos del listado, el Full
+// o el envío pueden diferir sin que nada haya cambiado) y el dato existe
+// en las dos. El inventario con "+" (mínimo) solo se compara con otro
+// "+": un piso no es una cantidad exacta.
+export function compararCompetidores(antes: CompetidorExtension, despues: CompetidorExtension): CambioCompetidor[] {
+  if (!antes.leidoDeFicha || !despues.leidoDeFicha) return [];
+  const cambios: CambioCompetidor[] = [];
+  const num = (campo: CampoCambio, a: number | null, d: number | null, umbral = 0) => {
+    if (a === null || d === null || a === d) return;
+    if (umbral > 0 && a > 0 && Math.abs(d - a) / a < umbral) return;
+    cambios.push({ campo, antes: a, despues: d });
+  };
+  const bool = (campo: CampoCambio, a: boolean | null, d: boolean | null) => {
+    if (a === null || d === null || a === d) return;
+    cambios.push({ campo, antes: a, despues: d });
+  };
+  num("precio", antes.precio, despues.precio);
+  if (antes.inventarioAproximado === despues.inventarioAproximado) num("inventario", antes.inventario, despues.inventario);
+  bool("esCatalogo", antes.esCatalogo, despues.esCatalogo);
+  bool("full", antes.full, despues.full);
+  bool("envioGratis", antes.envioGratis, despues.envioGratis);
+  num("ventasMes", antes.ventasMes, despues.ventasMes, UMBRAL_ESTIMADOS);
+  num("facturacionMes", antes.facturacionMes, despues.facturacionMes, UMBRAL_ESTIMADOS);
+  return cambios;
+}
+
+export type TextoCambio = { icono: "▲" | "▼" | "•"; texto: string };
+
+// Frase corta para mostrar un cambio. `f` pone el formato de plata y número.
+export function textoCambio(c: CambioCompetidor, f: { plata: (n: number) => string; num: (n: number) => string }): TextoCambio {
+  if (typeof c.antes === "boolean" && typeof c.despues === "boolean") {
+    const entro = c.despues;
+    if (c.campo === "esCatalogo") return { icono: "•", texto: entro ? "Entró al catálogo" : "Salió del catálogo" };
+    if (c.campo === "full") return { icono: "•", texto: entro ? "Entró a Full" : "Salió de Full" };
+    return { icono: "•", texto: entro ? "Puso envío gratis" : "Quitó el envío gratis" };
+  }
+  const a = c.antes as number;
+  const d = c.despues as number;
+  const sube = d > a;
+  const icono = sube ? "▲" : "▼";
+  const porcentaje = a > 0 ? ` (${sube ? "+" : "−"}${Math.round((Math.abs(d - a) / a) * 100)} %)` : "";
+  switch (c.campo) {
+    case "precio":
+      return { icono, texto: `${sube ? "Subió" : "Bajó"} el precio: ${f.plata(a)} → ${f.plata(d)}${porcentaje}` };
+    case "inventario":
+      return { icono, texto: `${sube ? "Subió" : "Bajó"} el inventario: ${f.num(a)} → ${f.num(d)}` };
+    case "ventasMes":
+      return { icono, texto: `${sube ? "Subieron" : "Bajaron"} las ventas/mes aprox.: ${f.num(a)} → ${f.num(d)}${porcentaje}` };
+    default:
+      return { icono, texto: `${sube ? "Subió" : "Bajó"} la facturación/mes aprox.: ${f.plata(a)} → ${f.plata(d)}${porcentaje}` };
+  }
+}
 
 // Une lo que acaba de leer la extensión con lo ya guardado.
 // - "busqueda" (Buscar 10 competidores): reemplaza lo que vino de una
 //   búsqueda anterior, pero conserva los que la persona agregó por link.
 // - "links" (Agregar por link / Actualizar): cada ficha leída reemplaza
-//   al mismo competidor (o se agrega como manual si es nuevo). Una ficha
-//   que no se pudo leer nunca pisa datos buenos ya guardados, y un link
-//   nuevo que no se pudo leer no se agrega.
+//   al mismo competidor (o se agrega como manual si es nuevo) y deja
+//   anotado qué cambió frente a la lectura anterior. Una ficha que no
+//   se pudo leer nunca pisa datos buenos ya guardados, y un link nuevo
+//   que no se pudo leer no se agrega.
 export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: CompetidorExtension[], modo: "busqueda" | "links", ahoraIso: string): ResultadoFusion {
-  const sello = (c: CompetidorExtension, manual: boolean): CompetidorExtension => ({ ...c, manual, actualizadoTs: c.leidoDeFicha ? ahoraIso : c.actualizadoTs });
+  // `previo` = la lectura anterior del mismo competidor (si la había).
+  const sello = (c: CompetidorExtension, manual: boolean, previo: CompetidorExtension | null): CompetidorExtension => {
+    if (!c.leidoDeFicha) return { ...c, manual };
+    const cambios = previo ? compararCompetidores(previo, c) : [];
+    return { ...c, manual, actualizadoTs: ahoraIso, cambios, cambiosDesdeTs: previo && previo.leidoDeFicha ? previo.actualizadoTs : null };
+  };
   let lista: CompetidorExtension[];
   let leidos = 0;
   let noLeidos = 0;
@@ -312,9 +414,10 @@ export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: C
       n.leidoDeFicha ? leidos++ : noLeidos++;
       const i = lista.findIndex((g) => mismoCompetidor(g, n));
       if (i >= 0) {
-        if (n.leidoDeFicha) lista[i] = sello(n, true);
+        if (n.leidoDeFicha) lista[i] = sello(n, true, lista[i]);
       } else {
-        lista.push(sello(n, false));
+        // Si ya estaba de una búsqueda anterior, se compara con esa lectura.
+        lista.push(sello(n, false, guardados.find((g) => mismoCompetidor(g, n)) ?? null));
       }
     }
   } else {
@@ -326,11 +429,12 @@ export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: C
         continue;
       }
       leidos++;
-      if (i >= 0) lista[i] = sello(n, lista[i].manual);
-      else lista.push(sello(n, true));
+      if (i >= 0) lista[i] = sello(n, lista[i].manual, lista[i]);
+      else lista.push(sello(n, true, null));
     }
   }
-  return { lista: lista.slice(0, MAXIMO_COMPETIDORES_EXTENSION), leidos, noLeidos };
+  const final = lista.slice(0, MAXIMO_COMPETIDORES_EXTENSION);
+  return { lista: final, leidos, noLeidos, conCambios: final.filter((c) => c.cambios.length > 0).length };
 }
 
 export function quitarCompetidor(lista: CompetidorExtension[], clave: string): CompetidorExtension[] {
