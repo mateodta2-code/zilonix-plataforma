@@ -140,7 +140,8 @@ export async function ventasPorVentanasTx(
   const idsVenta = [...new Set([...skuIds, ...componentes.map((c) => c.kitId)])];
   const { finExclusivo } = rangoUltimosNDiasBogota(ahora, 30);
   const inicioDe = (dias: number) => rangoUltimosNDiasBogota(ahora, dias).inicio;
-  const suma = (dias: number) => sql<number>`coalesce(sum(${pedidoItems.cantidad}) filter (where ${pedidos.fecha} >= ${inicioDe(dias)}), 0)::int`;
+  // El instante va como texto con su tipo: un Date suelto dentro de sql`` no pasa por el mapeo de columnas del driver.
+  const suma = (dias: number) => sql<number>`coalesce(sum(${pedidoItems.cantidad}) filter (where ${pedidos.fecha} >= ${inicioDe(dias).toISOString()}::timestamptz), 0)::int`;
 
   const filas = await tx
     .select({ skuId: pedidoItems.skuId, d3: suma(3), d7: suma(7), d14: suma(14), d20: suma(20), d30: suma(30) })
