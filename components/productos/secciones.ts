@@ -16,6 +16,8 @@ import type { SubitemNav } from "@/components/marco/tipos";
 // cambiaron de nombre: las rutas quedan igual para no romper enlaces
 // (la tabla de Inventario lleva a /panel/inventario/kardex?sku=…).
 // Devoluciones, Inventario Full y Proyección están en construcción.
+// «Crear producto (SKU)» va última, después de SKU: alta con costo,
+// precio, stock inicial y carga masiva (/panel/sku/crear).
 export const SECCIONES_PRODUCTOS: SubitemNav[] = [
   { etiqueta: "Registro de compras", href: "/panel/inventario/compras" },
   { etiqueta: "Inventario", href: "/panel/inventario" },
@@ -24,4 +26,5 @@ export const SECCIONES_PRODUCTOS: SubitemNav[] = [
   { etiqueta: "Inventario Full", href: "/panel/inventario/full" },
   { etiqueta: "Proyección de inventarios", href: "/panel/inventario/proyeccion" },
   { etiqueta: "SKU", href: "/panel/sku" },
+  { etiqueta: "Crear producto (SKU)", href: "/panel/sku/crear" },
 ];

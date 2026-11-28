@@ -7,7 +7,7 @@ import { FormularioPublicar } from "./FormularioPublicar";
 import { SeccionesImportar } from "./SeccionesImportar";
 import type { Cuenta } from "./CuentasDestino";
 import { HistorialPublicaciones, type ProductoHistorial } from "./HistorialPublicaciones";
-import { HistorialFalabella, type PublicacionFalabella } from "./HistorialFalabella";
+import type { PublicacionFalabella } from "./HistorialFalabella";
 import {
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
@@ -191,11 +191,11 @@ export function PaginaPublicar({
       />
 
       <div hidden={pestana !== "publicar"}>
-      <HistorialFalabella publicaciones={historialFalabella} />
 
       {/* --- Punto 8: historial (y, Parte 3 punto B, el permalink real por cuenta) --- */}
       <HistorialPublicaciones
         productos={historial}
+        falabella={historialFalabella}
         cuentas={cuentas}
         onCargar={(p) => cargarEnFormulario(p, "reintentar")}
         onDuplicar={(p) => cargarEnFormulario(p, "duplicar")}

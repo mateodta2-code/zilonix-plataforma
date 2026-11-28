@@ -1,0 +1,197 @@
+/* Issue #280 — «Crear producto (SKU)». Solo tokens de app/globals.css;
+   las tarjetas son <Tarjeta> (fondo oscuro, borde plata-azul) y la fila
+   de búsqueda copia .filtros de app/panel/sku/page.module.css para que
+   se vea igual en tema claro y oscuro. */
+
+.columnas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  margin: 16px 0 24px;
+  align-items: start;
+}
+
+.tarjeta {
+  margin-bottom: 16px;
+}
+
+.columnas > .tarjeta {
+  margin-bottom: 0;
+}
+
+/* Título de sección chico en mayúscula, como en /panel (Inicio). */
+.tituloSeccion {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--plata-etiqueta);
+}
+
+.pila {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filaForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filaForm > * {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.filaForm > * > * {
+  --alinear-boton: flex-start;
+}
+
+.campoSku {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.campoSku > input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.detalle {
+  margin: 0;
+  color: var(--texto-suave);
+  font-size: 12.5px;
+}
+
+.resumen {
+  margin: 0;
+  font-size: 14px;
+}
+
+.error {
+  margin: 0;
+  color: var(--peligro-texto);
+  font-size: 13px;
+}
+
+.advertencia {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.motivo {
+  display: block;
+  margin-top: 4px;
+  color: var(--peligro-texto);
+  font-size: 12.5px;
+}
+
+.enlace {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--acento-fuerte);
+  text-decoration: none;
+}
+
+.enlace:hover {
+  text-decoration: underline;
+}
+
+.enlace:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.filtros {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  --alinear-boton: flex-end;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 18px 18px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radio-tarjeta);
+  background:
+    radial-gradient(140px 72px at 100% 0%, var(--acento-resplandor-zona-oscura), transparent 72%) padding-box,
+    var(--tarjeta-fondo-capa) padding-box,
+    var(--degradado-plata-borde) border-box;
+  overflow: hidden;
+  color: var(--texto);
+  --degradado-plata-texto: var(--degradado-plata-texto-zona-oscura);
+  --plata-etiqueta: var(--plata-etiqueta-zona-oscura);
+  --texto-suave: var(--texto-suave-zona-oscura);
+  --texto: var(--texto-zona-oscura);
+}
+
+.filtros::before,
+.filtros::after {
+  content: "";
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--azul-metal-3), transparent);
+  pointer-events: none;
+}
+
+.filtros::before {
+  top: 0;
+}
+
+.filtros::after {
+  bottom: 0;
+}
+
+.filtros > * {
+  flex: 2 1 260px;
+  min-width: 0;
+}
+
+.filtros > * > * {
+  --alinear-boton: flex-start;
+}
+
+.filtros > .accionesFiltro {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .filtros {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filtros > .accionesFiltro {
+    margin-left: 0;
+  }
+}
