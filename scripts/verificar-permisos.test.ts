@@ -133,6 +133,10 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/sku/sin-vincular/page.tsx",
   "app/panel/sku/sin-vincular/actions.ts",
   "app/panel/sku/importar/page.tsx",
+  // Issue #280 — Crear producto (SKU): ver pide inventario.consultar;
+  // crear, inventario.crear; editar, inventario.modificar.
+  "app/panel/sku/crear/page.tsx",
+  "app/panel/sku/crear/actions.ts",
   "app/panel/pedidos/page.tsx",
   "app/panel/pedidos/[id]/page.tsx",
   "app/panel/despachos/page.tsx",
