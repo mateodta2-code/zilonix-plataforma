@@ -1,0 +1,1 @@
+- Los rechazos de Falabella se muestran en español, diciendo qué campo corregir.
