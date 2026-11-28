@@ -131,7 +131,6 @@ export async function corregirFalabellaAction(id: string, atributos: Record<stri
       if (!/^[A-Za-z][A-Za-z0-9_]{0,60}$/.test(nombre) || typeof valor !== "string") continue;
       if (valor.trim()) limpios[nombre] = valor.trim().slice(0, 500);
     }
-    if (Object.keys(limpios).length === 0) throw new Error("Llena al menos un campo.");
     await corregirRechazado(empresaId, id, limpios);
     return null;
   });

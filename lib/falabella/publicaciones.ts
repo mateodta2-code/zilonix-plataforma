@@ -125,7 +125,13 @@ export async function descartar(empresaId: string, id: string): Promise<void> {
 export async function corregirRechazado(empresaId: string, id: string, atributos: Record<string, string>): Promise<void> {
   const fila = await obtener(empresaId, id);
   if (!fila) throw new Error("No se encontró esa publicación.");
-  const borrador = { ...fila.borrador, atributos: { ...fila.borrador.atributos, ...atributos } };
+  const atributosNuevos = { ...fila.borrador.atributos, ...atributos };
+  // «X is/are not applicable to <categoría>»: Falabella no quiere ese atributo.
+  for (const e of fila.errores ?? []) {
+    const m = String(e).match(/^(\w+) is\/are not applicable to /i);
+    if (m) delete atributosNuevos[m[1]];
+  }
+  const borrador = { ...fila.borrador, atributos: atributosNuevos };
   if (!(await transicion(empresaId, id, "rechazado", { estado: "borrador", borrador, errores: [] }))) {
     throw new Error("Esta publicación ya no está rechazada.");
   }
