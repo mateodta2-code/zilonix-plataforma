@@ -549,3 +549,12 @@ Reglas de siempre: nunca inicia sesión ni pasa un captcha (si ML pide verificar
 **Pruebas**: `extension/background.test.ts` (remitente/término/itemId inválidos no abren nada; listado → 10 fichas sin la propia → resultado; ficha que no contesta queda con datos del listado; captcha y búsqueda vacía; links fuera de ML y cooldown; nunca alimenta Seguimiento), `extension/marcador-zilonix.test.ts` (los 3 mensajes nuevos y los `matches` del manifest), `lib/optimizacion/competidoresExtension.test.ts`.
 
 **Hay que reinstalar la extensión** (cambian los `matches` del manifest): "Recargar" no alcanza. Bajar el ZIP solo cuando `version.json` ya muestre 0.3.46.
+
+## v0.3.48 — competidores: fichas que sí se leen, agregar por link, parecido
+
+- **Bug real corregido (afectaba también a "Traer datos de ese link")**: la extensión no pide el permiso `tabs` ni `host_permissions` de Mercado Libre (a propósito, para la Chrome Web Store), así que Chrome le oculta `tab.url` de esas pestañas. `background.js` trataba "url ausente" como "no es Mercado Libre" y nunca pedía leer la ficha: los 10 competidores salían "solo datos del listado" (sin Full, envío, fotos, antigüedad, ventas/mes). Ahora `urlPermiteLeerFicha`: url ausente = se pide leer igual (`content.js` solo existe en dominios de Mercado Libre); url visible y ajena = nunca se lee.
+- **Los 10 más parecidos, no los 10 primeros**: con `tituloPropio`, del listado (~48) se eligen los 10 cuyo título comparte más palabras clave con la publicación propia (`parecidoDeTitulos`; empates en el orden de Mercado Libre). Compara palabras, no fotos.
+- **Modo links** (`"zilonix:iniciar-competidores"` con `links`): lee solo esos links (mismo allowlist de dominio, hasta 30), sin abrir listado. Lo usan "Agregar competidor" (un link) y "Actualizar datos" (todos los guardados). El resultado trae `modo: "links"`.
+- La ficha ya traía tienda (`vendedor`) y disponibles (`inventario`, `+50`); ahora se muestran como columnas en Optimización.
+
+Pruebas en `extension/background.test.ts` (url oculta, url ajena, ranking por parecido, modo links, links ajenos). **Hay que reinstalar la extensión** (cambia el código de `background.js`); bajar el ZIP solo cuando `version.json` ya muestre 0.3.48.

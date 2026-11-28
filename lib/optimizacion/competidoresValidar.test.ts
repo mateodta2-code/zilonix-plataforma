@@ -15,13 +15,14 @@ describe("validarCompetidores", () => {
     expect(r?.competidores).toHaveLength(1);
     expect(r?.competidores[0].foto).toBeNull();
   });
-  it("sin término o sin competidores válidos no se guarda nada", () => {
-    expect(validarCompetidores({ itemId: "MCO1", termino: "", candidatos: 1, competidores: [bueno] })).toBeNull();
-    expect(validarCompetidores({ itemId: "MCO1", termino: "x", candidatos: 0, competidores: [] })).toBeNull();
+  it("sin competidores válidos o sin lista no se guarda; sin término se guarda como «(por link)»; una lista vacía es válida (la persona quitó todos)", () => {
+    expect(validarCompetidores({ itemId: "MCO1", termino: "", candidatos: 1, competidores: [bueno] })?.termino).toBe("(por link)");
+    expect(validarCompetidores({ itemId: "MCO1", termino: "x", candidatos: 0, competidores: [] })?.competidores).toEqual([]);
     expect(validarCompetidores({ itemId: "MCO1", termino: "x", candidatos: 1, competidores: "no es lista" })).toBeNull();
+    expect(validarCompetidores({ itemId: "MCO1", termino: "x", candidatos: 1, competidores: [{ ...bueno, link: "https://malo.example.com/x" }] })).toBeNull();
   });
-  it("máximo 10 competidores", () => {
-    const muchos = Array.from({ length: 25 }, () => bueno);
-    expect(validarCompetidores({ itemId: "MCO1", termino: "x", candidatos: 25, competidores: muchos })?.competidores.length).toBeLessThanOrEqual(10);
+  it("máximo 30 competidores guardados (10 de la búsqueda + los agregados por link)", () => {
+    const muchos = Array.from({ length: 45 }, () => bueno);
+    expect(validarCompetidores({ itemId: "MCO1", termino: "x", candidatos: 45, competidores: muchos })?.competidores.length).toBe(30);
   });
 });

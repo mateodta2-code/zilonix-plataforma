@@ -49,7 +49,7 @@ function crearChromeMock() {
   // UNA VEZ POR CADA LECTURA (iniciarImportarLink lo agrega, y lo quita
   // apenas resuelve el link o se cancela) — por eso necesita un
   // registro real de varios listeners, nunca un solo slot.
-  const listenersOnUpdated: Array<(tabId: number, cambioInfo: { status?: string }, tab: { id: number; url: string }) => void> = [];
+  const listenersOnUpdated: Array<(tabId: number, cambioInfo: { status?: string }, tab: { id: number; url?: string }) => void> = [];
   const llamadas = {
     create: [] as Array<{ id: number; url: string; active: boolean }>,
     remove: [] as number[],
@@ -144,10 +144,10 @@ function crearChromeMock() {
       // Issue #44 (anexo) — registro real de varios listeners (ver el
       // comentario de listenersOnUpdated más arriba), nunca un slot.
       onUpdated: {
-        addListener: (fn: (tabId: number, cambioInfo: { status?: string }, tab: { id: number; url: string }) => void) => {
+        addListener: (fn: (tabId: number, cambioInfo: { status?: string }, tab: { id: number; url?: string }) => void) => {
           listenersOnUpdated.push(fn);
         },
-        removeListener: (fn: (tabId: number, cambioInfo: { status?: string }, tab: { id: number; url: string }) => void) => {
+        removeListener: (fn: (tabId: number, cambioInfo: { status?: string }, tab: { id: number; url?: string }) => void) => {
           const i = listenersOnUpdated.indexOf(fn);
           if (i !== -1) listenersOnUpdated.splice(i, 1);
         },
@@ -192,7 +192,7 @@ function crearChromeMock() {
     // Issue #44 (anexo) — simula que una pestaña terminó de cargar (o
     // sigue redirigiendo) con esta URL — dispara TODOS los listeners
     // de onUpdated registrados en este momento, como el Chrome real.
-    dispararTabActualizada: (tabId: number, url: string, status = "complete") => {
+    dispararTabActualizada: (tabId: number, url: string | undefined, status = "complete") => {
       for (const fn of [...listenersOnUpdated]) fn(tabId, { status }, { id: tabId, url });
     },
     cantidadListenersOnUpdated: () => listenersOnUpdated.length,
@@ -1060,6 +1060,64 @@ describe("zilonix:iniciar-competidores — Optimización, competidores fuera del
     expect(mockActual.cantidadListenersOnUpdated()).toBe(0);
   });
 
+  it("Chrome oculta tab.url de Mercado Libre (sin permiso tabs): igual se pide leer la ficha", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    const lectura = mockActual.llamadas.create[0];
+    await desdePestana(lectura.id, { tipo: "zilonix:escaneo-resultado", payload: { productos: [producto(2)] } });
+    mockActual.dispararTabActualizada(lectura.id, undefined);
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    expect(mockActual.llamadas.sendMessage.at(-1)).toEqual({ tabId: lectura.id, mensaje: { tipo: "zilonix:leer-competidor" } });
+  });
+
+  it("una pestaña que terminó en otro dominio (url visible y ajena) nunca se lee", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "tijera", excluirItemId: PROPIA });
+    const lectura = mockActual.llamadas.create[0];
+    await desdePestana(lectura.id, { tipo: "zilonix:escaneo-resultado", payload: { productos: [producto(2)] } });
+    mockActual.dispararTabActualizada(lectura.id, "https://evil.com/");
+    await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+    expect(mockActual.llamadas.sendMessage.find((m) => (m.mensaje as { tipo?: string }).tipo === "zilonix:leer-competidor")).toBeUndefined();
+  });
+
+  it("con el título propio elige los 10 más parecidos del listado, no los 10 primeros", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ termino: "luces led", excluirItemId: PROPIA, tituloPropio: "Luces Led Inalámbricas Para Cuadros Con Control Táctil Rgb Negro" });
+    const lectura = mockActual.llamadas.create[0];
+    const distintos = Array.from({ length: 12 }, (_, i) => ({ ...producto(i + 2), titulo: `Aro de luz tripode ${i}` }));
+    const parecido = { ...producto(40), titulo: "Luces Led Cuadros Inalámbricos Control Táctil RGB" };
+    await desdePestana(lectura.id, { tipo: "zilonix:escaneo-resultado", payload: { productos: [...distintos, parecido] } });
+    const primera = mockActual.llamadas.update.filter((u) => u.tabId === lectura.id).at(-1)!.props as { url: string };
+    expect(primera.url).toContain("100000040");
+  });
+
+  it("modo links ('Agregar por link' / 'Actualizar'): lee solo esos links, sin abrir ningún listado, y descarta los ajenos", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ links: ["https://articulo.mercadolibre.com.co/MCO-100000005-x-_JM", "https://evil.com/MCO-1", { link: "https://www.mercadolibre.com.co/lampara/up/MCO100000006", itemId: "MCO100000006" }], excluirItemId: PROPIA });
+    expect(mockActual.llamadas.create).toHaveLength(1);
+    const lectura = mockActual.llamadas.create[0];
+    expect(lectura.url).toBe("about:blank");
+    for (let i = 0; i < 2; i++) {
+      const navegacion = mockActual.llamadas.update.filter((u) => u.tabId === lectura.id).at(-1)!.props as { url: string };
+      expect(navegacion.url).toContain("_zilonix_competidor=1");
+      mockActual.dispararTabActualizada(lectura.id, navegacion.url);
+      await vi.advanceTimersByTimeAsync(RETRASO_MOCK_MS * 2);
+      await desdePestana(lectura.id, { tipo: "zilonix:resultado-leer-competidor", payload: { datos: { titulo: `Ficha ${i}`, precio: 10 } } });
+      await vi.advanceTimersByTimeAsync(600);
+    }
+    const resultado = aPanel("zilonix:competidores-resultado");
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].mensaje.payload.modo).toBe("links");
+    expect((resultado[0].mensaje.payload.competidores as Array<{ itemId: string }>).map((c) => c.itemId)).toEqual(["MCO100000005", "MCO100000006"]);
+  });
+
+  it("modo links sin ningún link válido: avisa y no abre pestañas", async () => {
+    await cargarBackgroundFresco();
+    await pedir({ links: ["https://evil.com/x"], excluirItemId: PROPIA });
+    expect(mockActual.llamadas.create).toEqual([]);
+    expect(aPanel("zilonix:competidores-error")[0].mensaje.payload.razon).toBe("sin_resultados");
+  });
+
   it("una ficha que no contesta en 15 s queda con los datos del listado y se sigue con la próxima", async () => {
     await cargarBackgroundFresco();
     await pedir({ termino: "tijera", excluirItemId: PROPIA });
@@ -1256,9 +1314,9 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
     });
   });
 
-  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.47", async () => {
+  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.48", async () => {
     const m = (await import("./manifest.json")).default as { host_permissions: string[]; version: string };
     expect(m.host_permissions).toEqual(["https://seller.zilonix.com/*", "https://web-staging-d979.up.railway.app/*"]);
-    expect(m.version).toBe("0.3.47");
+    expect(m.version).toBe("0.3.48");
   });
 });

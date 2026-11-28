@@ -5,7 +5,12 @@
 // arma el término de búsqueda y las alertas. Un dato que la ficha no
 // mostró queda en null y no genera alerta.
 
-import { alertasComparacion, MAXIMO_COMPETIDORES, type FilaComparacion } from "@/lib/optimizacion/competencia";
+import { alertasComparacion, type FilaComparacion } from "@/lib/optimizacion/competencia";
+
+// Competidores guardados por publicación: los 10 de la búsqueda más los
+// que la persona agrega por link (los guardados se conservan al buscar
+// de nuevo).
+export const MAXIMO_COMPETIDORES_EXTENSION = 30;
 
 export type CompetidorExtension = {
   itemId: string | null;
@@ -34,10 +39,15 @@ export type CompetidorExtension = {
   // false = la ficha no se pudo leer (tope de 15 s); solo trae lo que
   // mostraba el listado.
   leidoDeFicha: boolean;
+  // true = la persona lo agregó por link (o lo dejó fijo): se conserva
+  // cuando se vuelve a buscar.
+  manual: boolean;
+  // Última vez que se leyó su ficha de verdad (ISO). null = nunca.
+  actualizadoTs: string | null;
 };
 
 export type MensajeCompetidores =
-  | { tipo: "ok"; itemId: string; termino: string; candidatos: number; competidores: CompetidorExtension[] }
+  | { tipo: "ok"; itemId: string; termino: string; modo: "busqueda" | "links"; candidatos: number; competidores: CompetidorExtension[] }
   | { tipo: "error"; itemId: string; razon: string };
 
 // Mismo dominio anclado que la extensión (PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO).
@@ -72,6 +82,20 @@ function texto(valor: unknown, maximo = 300): string | null {
   return typeof valor === "string" && valor.trim() ? valor.trim().slice(0, maximo) : null;
 }
 
+function fechaIso(valor: unknown): string | null {
+  if (typeof valor !== "string") return null;
+  const ms = Date.parse(valor);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+// La ficha a veces dice "Vendido por TIENDA": solo se guarda el nombre.
+function nombreTienda(valor: unknown): string | null {
+  const t = texto(valor, 140);
+  if (!t) return null;
+  const limpio = t.replace(/^\s*(vendido|vendida)\s+por\s+/i, "").trim();
+  return limpio || null;
+}
+
 function booleano(valor: unknown): boolean | null {
   return typeof valor === "boolean" ? valor : null;
 }
@@ -96,7 +120,7 @@ function competidor(crudo: unknown): CompetidorExtension | null {
     link: c.link.slice(0, 500),
     titulo: texto(c.titulo),
     foto: esFotoMlValida(c.foto) ? c.foto : null,
-    vendedor: texto(c.vendedor, 120),
+    vendedor: nombreTienda(c.vendedor),
     precio: numero(c.precio),
     precioAnterior: numero(c.precioAnterior),
     descuentoPorcentaje: numero(c.descuentoPorcentaje),
@@ -116,6 +140,8 @@ function competidor(crudo: unknown): CompetidorExtension | null {
     ventasMes: numero(c.ventasMes),
     facturacionMes: numero(c.facturacionMes),
     leidoDeFicha: c.leidoDeFicha === true,
+    manual: c.manual === true,
+    actualizadoTs: fechaIso(c.actualizadoTs),
   };
 }
 
@@ -134,26 +160,34 @@ export function leerMensajeCompetidores(datos: unknown, itemIdEsperado: string):
   if (d.tipo !== "competidores-leidos") return null;
   const lista = Array.isArray(payload.competidores) ? payload.competidores : [];
   const competidores = lista
-    .slice(0, MAXIMO_COMPETIDORES)
+    .slice(0, MAXIMO_COMPETIDORES_EXTENSION)
     .map(competidor)
     .filter((c): c is CompetidorExtension => c !== null);
   return {
     tipo: "ok",
     itemId: itemIdEsperado,
     termino: texto(payload.termino, 120) ?? "",
+    modo: payload.modo === "links" ? "links" : "busqueda",
     candidatos: numero(payload.candidatos) ?? competidores.length,
     competidores,
   };
 }
 
 // Revalida con el mismo lector que usa la página con el mensaje de la extensión.
+// La lista puede quedar vacía (la persona quitó todos) y el término puede
+// faltar (solo se agregaron links): en ese caso se guarda "(por link)".
+export const TERMINO_POR_LINK = "(por link)";
 export function validarCompetidores(entrada: { itemId: string; termino: unknown; candidatos: unknown; competidores: unknown }): { termino: string; candidatos: number; competidores: CompetidorExtension[] } | null {
+  if (!Array.isArray(entrada.competidores)) return null;
   const m = leerMensajeCompetidores(
     { fuente: "zilonix-extension", tipo: "competidores-leidos", payload: { excluirItemId: entrada.itemId, termino: entrada.termino, candidatos: entrada.candidatos, competidores: entrada.competidores } },
     entrada.itemId
   );
-  if (!m || m.tipo !== "ok" || !m.termino || m.competidores.length === 0) return null;
-  return { termino: m.termino, candidatos: m.candidatos, competidores: m.competidores };
+  if (!m || m.tipo !== "ok") return null;
+  // Un elemento descartado por inválido no se guarda en silencio como
+  // "vacío": si TODO lo recibido era inválido, es un error.
+  if (entrada.competidores.length > 0 && m.competidores.length === 0) return null;
+  return { termino: m.termino || TERMINO_POR_LINK, candidatos: m.candidatos, competidores: m.competidores };
 }
 
 const RAZONES: Record<string, string> = {
@@ -201,4 +235,122 @@ export function rotuloAntiguedad(dias: number | null): string | null {
   if (dias < 60) return `${Math.round(dias)} ${Math.round(dias) === 1 ? "día" : "días"}`;
   if (dias < 730) return `${Math.round(dias / 30)} meses`;
   return `${Math.round(dias / 365)} años`;
+}
+
+
+// ── Parecido con la publicación propia ──────────────────────────────
+// Una búsqueda como "luces led" trae diseños distintos. Sin comparar
+// fotos (no se hace acá), lo más fiable es cuántas palabras clave del
+// título propio aparecen en el título del otro.
+
+const PALABRAS_SIN_PESO = new Set([
+  "para", "con", "sin", "del", "los", "las", "una", "uno", "unos", "unas", "por", "que", "como", "mas", "muy", "the", "and", "set", "kit", "pack", "nuevo", "nueva", "original", "envio", "gratis", "full", "oferta",
+]);
+
+export function palabrasClave(titulo: string | null): string[] {
+  if (!titulo) return [];
+  const limpias = titulo
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((p) => p.length >= 2 && !PALABRAS_SIN_PESO.has(p));
+  return Array.from(new Set(limpias));
+}
+
+// 0 a 1; null si no hay título propio o del otro con qué comparar.
+export function parecidoTitulos(tituloPropio: string | null, tituloOtro: string | null): number | null {
+  const propias = palabrasClave(tituloPropio);
+  if (propias.length === 0 || !tituloOtro) return null;
+  const otras = new Set(palabrasClave(tituloOtro));
+  const comunes = propias.filter((p) => otras.has(p)).length;
+  return comunes / propias.length;
+}
+
+export type NivelParecido = "alto" | "medio" | "bajo";
+
+export function nivelParecido(parecido: number | null): NivelParecido | null {
+  if (parecido === null) return null;
+  return parecido >= 0.7 ? "alto" : parecido >= 0.4 ? "medio" : "bajo";
+}
+
+export const ROTULO_PARECIDO: Record<NivelParecido, string> = {
+  alto: "Muy parecido",
+  medio: "Parecido",
+  bajo: "Poco parecido: revisa si es el mismo producto",
+};
+
+// ── Guardar, fusionar y quitar ──────────────────────────────────────
+
+export function claveCompetidor(c: Pick<CompetidorExtension, "itemId" | "link">): string {
+  return c.itemId ?? c.link;
+}
+
+function mismoCompetidor(a: CompetidorExtension, b: CompetidorExtension): boolean {
+  return (a.itemId !== null && a.itemId === b.itemId) || a.link === b.link;
+}
+
+export type ResultadoFusion = { lista: CompetidorExtension[]; leidos: number; noLeidos: number };
+
+// Une lo que acaba de leer la extensión con lo ya guardado.
+// - "busqueda" (Buscar 10 competidores): reemplaza lo que vino de una
+//   búsqueda anterior, pero conserva los que la persona agregó por link.
+// - "links" (Agregar por link / Actualizar): cada ficha leída reemplaza
+//   al mismo competidor (o se agrega como manual si es nuevo). Una ficha
+//   que no se pudo leer nunca pisa datos buenos ya guardados, y un link
+//   nuevo que no se pudo leer no se agrega.
+export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: CompetidorExtension[], modo: "busqueda" | "links", ahoraIso: string): ResultadoFusion {
+  const sello = (c: CompetidorExtension, manual: boolean): CompetidorExtension => ({ ...c, manual, actualizadoTs: c.leidoDeFicha ? ahoraIso : c.actualizadoTs });
+  let lista: CompetidorExtension[];
+  let leidos = 0;
+  let noLeidos = 0;
+
+  if (modo === "busqueda") {
+    const manuales = guardados.filter((g) => g.manual);
+    lista = [...manuales];
+    for (const n of nuevos) {
+      n.leidoDeFicha ? leidos++ : noLeidos++;
+      const i = lista.findIndex((g) => mismoCompetidor(g, n));
+      if (i >= 0) {
+        if (n.leidoDeFicha) lista[i] = sello(n, true);
+      } else {
+        lista.push(sello(n, false));
+      }
+    }
+  } else {
+    lista = [...guardados];
+    for (const n of nuevos) {
+      const i = lista.findIndex((g) => mismoCompetidor(g, n));
+      if (!n.leidoDeFicha) {
+        noLeidos++;
+        continue;
+      }
+      leidos++;
+      if (i >= 0) lista[i] = sello(n, lista[i].manual);
+      else lista.push(sello(n, true));
+    }
+  }
+  return { lista: lista.slice(0, MAXIMO_COMPETIDORES_EXTENSION), leidos, noLeidos };
+}
+
+export function quitarCompetidor(lista: CompetidorExtension[], clave: string): CompetidorExtension[] {
+  return lista.filter((c) => claveCompetidor(c) !== clave);
+}
+
+// Link que la persona pega: solo Mercado Libre (mismo patrón anclado
+// que el resto), https.
+export function esLinkCompetidorValido(link: string): boolean {
+  const l = link.trim();
+  return PATRON_LINK_ML.test(l) || /^https:\/\/meli\.la\//i.test(l);
+}
+
+// Foto en tamaño grande ("-O" es el original en Mercado Libre) para
+// ampliarla; si no hay un sufijo conocido, la misma.
+export function fotoGrande(url: string): string {
+  return esFotoMlValida(url) ? url.replace(/-[A-Z](\.(?:webp|jpg|jpeg|png))(\?.*)?$/i, "-O$1$2") : url;
+}
+
+// Cuánto esperar a la extensión: listado + una ficha por link.
+export function esperaMaximaMs(fichas: number): number {
+  return 30_000 + Math.max(1, fichas) * 17_000;
 }
