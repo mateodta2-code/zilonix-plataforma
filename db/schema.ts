@@ -115,6 +115,14 @@ export const empresas = pgTable("empresas", {
   // sobre esta columna. null = nadie ha entrado desde que se empezó a
   // registrar (no es lo mismo que «nunca»).
   ultimoIngresoTs: timestamp("ultimo_ingreso_ts", { withTimezone: true }),
+  // Por pagar automático desde las ventas (28-nov, Sharel con OK de
+  // Mateo): solo generan deuda con terceros las ventas despachadas desde
+  // este instante. Las empresas que ya existían quedan con la hora en que
+  // corrió la migración (en producción, el release), así lo que ya
+  // registraron a mano como gasto no se cuenta dos veces; una empresa
+  // nueva, con la de su creación. app_user no la puede cambiar (GRANT
+  // UPDATE por columna en db/rls-setup.sql).
+  porPagarVentasDesde: timestamp("por_pagar_ventas_desde", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   planValido: check("empresas_plan_valido", sql`${t.plan} in ('prueba', 'basico', 'pro', 'empresarial')`),
   estadoValido: check("empresas_estado_valido", sql`${t.estado} in ('activa', 'suspendida')`),
@@ -1124,6 +1132,13 @@ export const pedidosFinanzas = pgTable(
     // el envío es $0.
     empaqueCongelado: numeric("empaque_congelado", { precision: 14, scale: 2 }),
     envioAgenciaCongelado: numeric("envio_agencia_congelado", { precision: 14, scale: 2 }),
+    // Por pagar automático (28-nov): a quién se le debe el empaque y el
+    // envío de esta orden. Se congelan junto con los montos, con el
+    // tercero habitual de ese momento (empaque; agencia o Flex según la
+    // forma de entrega; Full no tiene envío). Vacío = venta congelada
+    // antes de esto, o sin habitual marcado: no genera deuda.
+    empaqueTerceroId: uuid("empaque_tercero_id"),
+    envioTerceroId: uuid("envio_tercero_id"),
     estadoCosteo: estadoCosteoEnum("estado_costeo").notNull().default("sin_costo"),
     // Vacío = todavía no se congeló.
     congeladoTs: timestamp("congelado_ts", { withTimezone: true }),
@@ -1163,6 +1178,17 @@ export const pedidosFinanzas = pgTable(
     empresaPedidoUnico: unique("pedidos_finanzas_empresa_pedido_unico").on(t.empresaId, t.pedidoId),
     porShipment: index("pedidos_finanzas_empresa_shipment_idx").on(t.empresaId, t.shipmentIdExterno),
     porFechaDespacho: index("pedidos_finanzas_empresa_fecha_despacho_idx").on(t.empresaId, t.fechaDespacho),
+    // Una venta de la empresa A nunca le debe a un tercero de B.
+    empaqueTerceroDeLaEmpresa: foreignKey({
+      name: "pedidos_finanzas_empaque_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.empaqueTerceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+    envioTerceroDeLaEmpresa: foreignKey({
+      name: "pedidos_finanzas_envio_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.envioTerceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
     valorVentaNoNegativo: check("pedidos_finanzas_valor_venta_no_negativo", sql`${t.valorVenta} >= 0`),
     reembolsosNoNegativos: check("pedidos_finanzas_reembolsos_no_negativos", sql`${t.reembolsos} >= 0`),
     comisionNoNegativa: check("pedidos_finanzas_comision_ml_no_negativa", sql`${t.comisionMl} >= 0`),
@@ -3124,6 +3150,42 @@ export const gastos = pgTable(
     pagoCoherente: check("gastos_pago_coherente", sql`(${t.estado} = 'pagado') = (${t.fechaPago} is not null)`),
     porFecha: index("gastos_empresa_fecha_idx").on(t.empresaId, t.fechaGasto),
     porEstado: index("gastos_empresa_estado_idx").on(t.empresaId, t.estado, t.fechaVencimiento),
+  })
+);
+
+// Por pagar automático (28-nov) — pagos a un tercero de lo que le deben
+// las ventas en un periodo (empaque y envío). Lo pendiente se calcula al
+// leer (lib/finanzas/por-pagar-db.ts): lo de las ventas del periodo menos
+// lo pagado acá; si llega una venta tarde a un periodo ya pagado, queda
+// pendiente solo la diferencia. Sin UPDATE ni DELETE para app_user: un
+// pago es historia, y cada uno queda en `auditoria`.
+export const pagosTercerosVentas = pgTable(
+  "pagos_terceros_ventas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    terceroId: uuid("tercero_id").notNull(),
+    // Periodo de cobro del tercero (día, semana, quincena o mes), días de Bogotá.
+    periodoDesde: date("periodo_desde", { mode: "string" }).notNull(),
+    periodoHasta: date("periodo_hasta", { mode: "string" }).notNull(),
+    moneda: text("moneda").notNull(),
+    monto: numeric("monto", { precision: 14, scale: 2 }).notNull(),
+    fechaPago: date("fecha_pago", { mode: "string" }).notNull(),
+    medioPago: text("medio_pago"),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    terceroDeLaEmpresa: foreignKey({
+      name: "pagos_terceros_ventas_tercero_misma_empresa_fk",
+      columns: [t.empresaId, t.terceroId],
+      foreignColumns: [terceros.empresaId, terceros.id],
+    }).onDelete("restrict"),
+    porPeriodo: index("pagos_terceros_ventas_empresa_tercero_periodo_idx").on(t.empresaId, t.terceroId, t.periodoDesde),
+    periodoValido: check("pagos_terceros_ventas_periodo_valido", sql`${t.periodoHasta} >= ${t.periodoDesde}`),
+    montoPositivo: check("pagos_terceros_ventas_monto_positivo", sql`${t.monto} > 0`),
+    monedaIso: check("pagos_terceros_ventas_moneda_iso", sql`${t.moneda} ~ '^[A-Z]{3}$'`),
+    medioPagoLargo: check("pagos_terceros_ventas_medio_pago_largo", sql`${t.medioPago} is null or char_length(${t.medioPago}) between 1 and 60`),
   })
 );
 

@@ -13,6 +13,11 @@
 //
 // Mientras la venta no está congelada se reevalúa en cada pasada: al
 // cargar el costo en la maestra, la próxima sincronización la congela.
+//
+// Por pagar automático (28-nov): junto con el empaque y el envío se
+// congela a qué tercero se le deben (el habitual de ese momento,
+// lib/finanzas/por-pagar-ventas.ts). Cambiar de habitual después no
+// mueve la deuda de las ventas ya congeladas.
 
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { db } from "@/db";
@@ -21,6 +26,7 @@ import { configuracionFinanzas, costosSku, pedidoItems, pedidos, pedidosFinanzas
 import { normalizarSkuCodigo } from "@/lib/costos-sku";
 import { codigosParaMaestra } from "./combo-sku";
 import { congelarPaquete, type AlertaCongelado, type EstadoCosteo, type MaestraSku, type OrdenACongelar } from "./congelar";
+import { tercerosDeLaVenta, type TercerosHabituales } from "./por-pagar-ventas";
 import { aCentavos, desdeCentavos, repartirProporcional } from "./utilidad-venta";
 import type { VentaMl } from "./venta-ml";
 
@@ -231,6 +237,8 @@ async function congelarSiCorresponde(
       : undefined,
   });
 
+  const habituales = resultado.ordenes.some((o) => o.congelar) ? await leerTercerosHabituales(tx, empresaId) : null;
+
   const ahora = new Date();
   for (const orden of resultado.ordenes) {
     if (!orden.congelar) {
@@ -242,7 +250,13 @@ async function congelarSiCorresponde(
     }
     const marcadas = await tx
       .update(pedidosFinanzas)
-      .set({ estadoCosteo: "completo", empaqueCongelado: orden.empaque, envioAgenciaCongelado: orden.envio, congeladoTs: ahora })
+      .set({
+        estadoCosteo: "completo",
+        empaqueCongelado: orden.empaque,
+        envioAgenciaCongelado: orden.envio,
+        ...tercerosDeLaVenta(formaEntrega, { empaque: orden.empaque, envio: orden.envio }, habituales!),
+        congeladoTs: ahora,
+      })
       .where(and(eq(pedidosFinanzas.pedidoId, orden.pedidoId), isNull(pedidosFinanzas.congeladoTs)))
       .returning({ id: pedidosFinanzas.id });
     if (marcadas.length === 0) continue;
@@ -264,3 +278,22 @@ async function congelarSiCorresponde(
   };
 }
 
+// Habituales activos de la empresa (a lo sumo uno por concepto: índices
+// únicos en terceros). Sin habitual marcado, ese concepto no genera
+// deuda automática.
+async function leerTercerosHabituales(tx: Tx, empresaId: string): Promise<TercerosHabituales> {
+  const filas = await tx
+    .select({
+      id: terceros.id,
+      empaque: terceros.predeterminadoEmpaque,
+      agencia: terceros.predeterminadoEnvioAgencia,
+      flex: terceros.predeterminadoFlex,
+    })
+    .from(terceros)
+    .where(and(eq(terceros.empresaId, empresaId), eq(terceros.activo, true)));
+  return {
+    empaque: filas.find((f) => f.empaque)?.id ?? null,
+    agencia: filas.find((f) => f.agencia)?.id ?? null,
+    flex: filas.find((f) => f.flex)?.id ?? null,
+  };
+}

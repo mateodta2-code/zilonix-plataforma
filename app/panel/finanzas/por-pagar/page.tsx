@@ -26,7 +26,8 @@ import { marcarPagadoPorPagarAction } from "./actions";
 import styles from "../finanzas.module.css";
 
 // Issue #422 (fase 5 de Finanzas) — cuentas por pagar: gastos externos
-// pendientes y órdenes de compra sin pagar. Ver exige
+// pendientes, órdenes de compra sin pagar y, desde el 28-nov, el empaque
+// y envío que las ventas despachadas le deben a los terceros habituales. Ver exige
 // finanzas.consultar; «Marcar pagado», finanzas.modificar (también en el
 // servidor). Cada monto con su moneda; los totales nunca mezclan monedas
 // y salen de agregados en SQL (lib/finanzas/por-pagar-db.ts).
@@ -74,7 +75,7 @@ export default async function PorPagarPage({ searchParams }: { searchParams: Rec
     <>
       <EncabezadoPagina
         titulo="Cuentas por pagar"
-        descripcion="Lo que la empresa debe y aún no ha pagado: gastos externos pendientes (incluye agencias, transportadoras y Flex) y órdenes de compra sin pagar."
+        descripcion="Lo que la empresa debe y aún no ha pagado: gastos externos pendientes, órdenes de compra sin pagar y el empaque y envío que las ventas despachadas le deben a tus proveedores habituales de empaque, agencia y Flex (se suma solo con cada venta)."
       />
 
       {error && <p className={styles.avisoError}>{error}</p>}
@@ -144,7 +145,8 @@ export default async function PorPagarPage({ searchParams }: { searchParams: Rec
         <h2 className={styles.tituloSeccion}>Partidas pendientes</h2>
         {filas.length === 0 ? (
           <EstadoVacio>
-            No hay nada por pagar{hayFiltros ? " con estos filtros" : ""}. Los gastos se registran en Gastos; las órdenes de compra, en Productos → Registro de compras.
+            No hay nada por pagar{hayFiltros ? " con estos filtros" : ""}. Los gastos se registran en Gastos; las órdenes de compra, en Productos → Registro de compras. El empaque y el envío de las ventas se suman solos cuando hay
+            un proveedor habitual de empaque, agencia o Flex marcado en Finanzas → Configuración → Proveedores.
           </EstadoVacio>
         ) : (
           <>

@@ -1,0 +1,14 @@
+- **2026-11-28** — Finanzas → Por pagar se alimenta solo con las ventas (pedido de Sharel, con OK de Mateo). **Migración 0062.**
+
+  - **Qué se debe y a quién**: cada venta, al congelarse, guarda también a qué tercero le debe el empaque (siempre el habitual de empaque) y el envío (el habitual de agencia o de Flex según la forma de entrega; Full no tiene envío). Columnas nuevas `pedidos_finanzas.empaque_tercero_id` y `envio_tercero_id`, con FK compuesta a `terceros` (una venta de A nunca le debe a un tercero de B). Cambiar de habitual después no mueve la deuda de las ventas ya congeladas. Sin habitual marcado, ese concepto no genera deuda.
+  - **Cuándo**: la deuda nace con el despacho. Una venta cancelada o devuelta después de despachada se paga igual (decisión de Sharel); una sin despachar no debe nada.
+  - **Arranque inmediato**: `empresas.por_pagar_ventas_desde` (`DEFAULT now()`). Las empresas que ya existían quedan con la hora en que corre la migración: en producción, el release. Así lo que ya registraron a mano como gasto no se cuenta dos veces. Las ventas congeladas antes de este cambio no tienen tercero y tampoco generan deuda. `app_user` no puede cambiar esa columna.
+  - **Periodos** (según la condición de pago del tercero): «inmediato» = un total por día, que vence ese día (decisión de Sharel); cuenta de cobro semanal (lunes a domingo), quincenal (1-15 y 16-fin de mes) o mensual, que vence al cierre + plazo del tercero (si no tiene, el de la empresa); «anticipado Full» no genera deuda.
+  - **Por pagar**: nuevo origen «Ventas (empaque y envío)», calculado en SQL como el resto (`lib/finanzas/por-pagar-db.ts`): lo de las ventas del periodo − lo pagado. Entra en las tarjetas, los filtros (origen, proveedor, estado) y la tabla.
+  - **Marcar pagado**: registra un pago en la tabla nueva `pagos_terceros_ventas` por lo pendiente de ese tercero, periodo y moneda. El monto se recalcula en el servidor y nunca sale del formulario. Si después llega una venta tarde a ese periodo, queda pendiente solo la diferencia. Bloquea al tercero (`FOR UPDATE`) para que dos clics no paguen dos veces. Queda en `auditoria`. RLS con política de aislamiento; `app_user` solo SELECT e INSERT (un pago no se edita ni se borra).
+
+  Pruebas: `lib/finanzas/por-pagar-ventas.test.ts` (nuevo, puro). `db/rls-pagos-terceros-ventas.test.ts` (nuevo, Postgres real, corre en CI): periodos y vencimientos, fuera lo no despachado y lo de antes del arranque, una cancelada despachada se cobra, marcar pagado, venta tarde, doble pago, aislamiento entre empresas y sin UPDATE/DELETE. `tsc` en verde.
+
+  **Después de mergear (staging)**: revisar en los logs del deploy `[migrar-al-desplegar] Listo.` y marcar en Finanzas → Configuración → Proveedores los habituales de empaque, agencia y Flex. Producción: la migración 0062 y `db/rls-setup.sql` los aplica Mateo en el release.
+
+  Refs #422

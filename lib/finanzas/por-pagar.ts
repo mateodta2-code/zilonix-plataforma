@@ -2,18 +2,20 @@ import { normalizarParametro } from "@/lib/filtros-listado";
 import { esUuid } from "./gastos";
 
 // Issue #422 (fase 5 de Finanzas) — cuentas por pagar: lo que la
-// empresa debe y aún no ha pagado. Dos orígenes, cada uno en su propia
-// tabla (nada se duplica): gastos externos pendientes (incluye agencias,
-// transportadoras y Flex, que por ahora se registran como gastos de esas
-// categorías) y órdenes de compra sin fecha de pago. Este archivo es la
-// parte pura (filtros y etiquetas); la consulta vive en por-pagar-db.ts.
+// empresa debe y aún no ha pagado. Tres orígenes, cada uno con su propia
+// fuente (nada se duplica): gastos externos pendientes, órdenes de compra
+// sin fecha de pago y, desde el 28-nov, lo que las ventas despachadas le
+// deben a los terceros habituales de empaque, agencia y Flex
+// (por-pagar-ventas.ts). Este archivo es la parte pura (filtros y
+// etiquetas); la consulta vive en por-pagar-db.ts.
 
-export const ORIGENES_POR_PAGAR = ["gasto", "orden"] as const;
+export const ORIGENES_POR_PAGAR = ["gasto", "orden", "ventas"] as const;
 export type OrigenPorPagar = (typeof ORIGENES_POR_PAGAR)[number];
 
 export const ETIQUETA_ORIGEN_POR_PAGAR: Record<OrigenPorPagar, string> = {
   gasto: "Gasto",
   orden: "Orden de compra",
+  ventas: "Ventas (empaque y envío)",
 };
 
 // vencido: la fecha de vencimiento ya pasó. por_vencer: vence de hoy a

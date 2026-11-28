@@ -110,6 +110,11 @@ GRANT SELECT, INSERT, UPDATE ON optimizacion_competidores_ext TO app_user;
 -- externos y sus categorías. Sin DELETE: una categoría se desactiva y un
 -- gasto se corrige editándolo (cada cambio queda en auditoria).
 GRANT SELECT, INSERT, UPDATE ON categorias_gasto, gastos TO app_user;
+-- Por pagar automático (28-nov, migración 0062) — pagos a terceros de lo
+-- que deben las ventas. Solo SELECT e INSERT: un pago es historia, no se
+-- edita ni se borra (cada uno queda en auditoria).
+GRANT SELECT, INSERT ON pagos_terceros_ventas TO app_user;
+REVOKE UPDATE, DELETE ON pagos_terceros_ventas FROM app_user;
 -- Tarea "Publicar — conectar Canva" — a diferencia de ia_conexiones,
 -- desconectar Canva NUNCA borra la fila (decisión explícita de
 -- Pablo/Mateo: queda desconectada_ts como histórico, los tokens se
@@ -341,6 +346,8 @@ ALTER TABLE categorias_gasto ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categorias_gasto FORCE ROW LEVEL SECURITY;
 ALTER TABLE gastos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gastos FORCE ROW LEVEL SECURITY;
+ALTER TABLE pagos_terceros_ventas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pagos_terceros_ventas FORCE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canva_conexiones FORCE ROW LEVEL SECURITY;
 ALTER TABLE accesos_temporales ENABLE ROW LEVEL SECURITY;
@@ -648,6 +655,12 @@ CREATE POLICY aislamiento_categorias_gasto ON categorias_gasto
 
 DROP POLICY IF EXISTS aislamiento_gastos ON gastos;
 CREATE POLICY aislamiento_gastos ON gastos
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+-- Por pagar automático (28-nov) — una empresa nunca ve ni registra pagos
+-- a terceros de otra.
+DROP POLICY IF EXISTS aislamiento_pagos_terceros_ventas ON pagos_terceros_ventas;
+CREATE POLICY aislamiento_pagos_terceros_ventas ON pagos_terceros_ventas
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 -- Tarea "Publicar — conectar Canva" — a diferencia de TODAS las demás
