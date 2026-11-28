@@ -123,6 +123,7 @@ const RUTAS_PROTEGIDAS = new Set([
   // Submódulos de Productos en construcción: no leen datos, pero piden
   // inventario.consultar igual que el menú.
   "app/panel/inventario/devoluciones/page.tsx",
+  "app/panel/inventario/devoluciones/actions.ts",
   "app/panel/inventario/full/page.tsx",
   "app/panel/inventario/proyeccion/page.tsx",
   "app/panel/inventario/proyeccion/actions.ts",

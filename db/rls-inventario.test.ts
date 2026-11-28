@@ -16,12 +16,14 @@ import {
   skus,
   stockBodega,
   syncStockMl,
+  devolucionesInventario,
 } from "./schema";
 import { crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { crearCuentaMlDePrueba } from "./test-utils/venta";
 import { crearBodega } from "../lib/inventario/bodegas";
 import { actualizarDatosCompra, actualizarLineasCompra, CompraInvalidaError, crearOrdenCompra, listarRegistroCompras, registrarCompra, registrarRecepcion } from "../lib/inventario/compras";
 import { SkuCodigoDuplicadoError } from "../lib/ml/sku";
+import { anularDevolucion, DevolucionInvalidaError, guardarDevolucionesMl, listarDevoluciones, NOMBRE_BODEGA_AVERIADOS, recibirDevolucion, registrarDevolucion } from "../lib/inventario/devoluciones";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
 import { guardarConfiguracionInventario } from "../lib/inventario/configuracion";
 import { listarInventarioParaExportar, listarKardexParaExportar, stockPorBodegaDeSkus } from "../lib/inventario/stock";
@@ -341,5 +343,56 @@ describe("inventario (RLS, issue #280)", () => {
     // Por pagar pide permisos de finanzas que este contexto no arma.)
     await dbComoEmpresa(c.empresaAId, (tx) => tx.update(ordenesCompra).set({ fechaPago: "2026-11-27", medioPago: "MATEO AMEX" }).where(eq(ordenesCompra.id, oc)));
     await expect(actualizarLineasCompra(c.empresaAId, c.usuarioAId, oc, [{ itemId: item.id, cantidad: 5, costoUnitario: "3000" }])).rejects.toThrow(/liquidada/);
+  });
+
+  it("Devoluciones: las de ML por llegar se traen una vez con el SKU de la venta; bueno suma a la bodega, averiado a Averiados; B no ve ni recibe", async () => {
+    const skuDev = await crearSku(c.empresaAId, "DEV-A");
+    const cuentaMlId = await crearCuentaMlDePrueba(c.empresaAId);
+    const orden = `orden-dev-${randomUUID().slice(0, 8)}`;
+    await dbComoEmpresa(c.empresaAId, async (tx) => {
+      const [pedido] = await tx
+        .insert(pedidos)
+        .values({ empresaId: c.empresaAId, cuentaMlId, pedidoIdExterno: orden, fecha: new Date(), total: "1000.00", moneda: "COP", estado: "paid" })
+        .returning({ id: pedidos.id });
+      await tx.insert(pedidoItems).values({ empresaId: c.empresaAId, pedidoId: pedido.id, linea: 1, itemIdExterno: "MCO9", skuCodigo: "DEV-A", skuId: skuDev, cantidad: 2, precioUnitario: "500.00", valorLinea: "1000.00", titulo: "Producto devuelto" });
+    });
+    const aviso = { reclamoId: "900001", ordenId: orden, fecha: "2026-11-27", estadoEnvio: "En camino", cuentaMlId };
+    expect(await guardarDevolucionesMl(c.empresaAId, c.usuarioAId, [aviso, { ...aviso, reclamoId: "900002", ordenId: "orden-que-no-existe" }])).toMatchObject({ nuevas: 2, sinVenta: 1 });
+    // Traer otra vez no duplica; solo refresca el estado del envío.
+    expect(await guardarDevolucionesMl(c.empresaAId, c.usuarioAId, [{ ...aviso, estadoEnvio: "Entregado" }])).toMatchObject({ nuevas: 0, actualizadas: 1 });
+
+    const filas = await listarDevoluciones(c.empresaAId, orden);
+    expect(filas).toHaveLength(1);
+    expect(filas[0]).toMatchObject({ skuCodigo: "DEV-A", producto: "Producto devuelto", cantidad: 2, estado: "por_llegar", estadoEnvioMl: "Entregado" });
+    // B no la ve ni la recibe.
+    expect(await listarDevoluciones(c.empresaBId, orden)).toHaveLength(0);
+    await expect(recibirDevolucion(c.empresaBId, c.usuarioBId, filas[0].id, { condicion: "bueno", bodegaId: bodegaA, skuId: null, cantidad: 2 })).rejects.toBeInstanceOf(DevolucionInvalidaError);
+
+    // Bueno: suma a la bodega elegida, con su movimiento «devolucion».
+    const stock = async (bodegaId: string) =>
+      (await dbComoEmpresa(c.empresaAId, (tx) => tx.select({ d: stockBodega.disponible }).from(stockBodega).where(sql`${stockBodega.skuId} = ${skuDev} and ${stockBodega.bodegaId} = ${bodegaId}`)))[0]?.d ?? 0;
+    await recibirDevolucion(c.empresaAId, c.usuarioAId, filas[0].id, { condicion: "bueno", bodegaId: bodegaA, skuId: null, cantidad: 2 });
+    expect(await stock(bodegaA)).toBe(2);
+    await expect(recibirDevolucion(c.empresaAId, c.usuarioAId, filas[0].id, { condicion: "bueno", bodegaId: bodegaA, skuId: null, cantidad: 2 })).rejects.toThrow(/ya se recibió/);
+
+    // Averiado (la de la venta que no estaba: se elige el SKU al recibir) → bodega Averiados, que no suma a lo publicado.
+    const [sinSku] = await listarDevoluciones(c.empresaAId, "orden-que-no-existe");
+    expect(sinSku.skuId).toBeNull();
+    await expect(recibirDevolucion(c.empresaAId, c.usuarioAId, sinSku.id, { condicion: "averiado", bodegaId: null, skuId: null, cantidad: 1 })).rejects.toThrow(/elige cuál volvió/);
+    await recibirDevolucion(c.empresaAId, c.usuarioAId, sinSku.id, { condicion: "averiado", bodegaId: null, skuId: skuDev, cantidad: 1 });
+    const [averiados] = await dbComoEmpresa(c.empresaAId, (tx) => tx.select().from(bodegas).where(eq(bodegas.nombre, NOMBRE_BODEGA_AVERIADOS)));
+    expect(averiados.sumaAlPublicado).toBe(false);
+    expect(await stock(averiados.id)).toBe(1);
+    const [mov] = await dbComoEmpresa(c.empresaAId, (tx) => tx.select({ origen: kardexMovimientos.origen }).from(kardexMovimientos).where(eq(kardexMovimientos.referenciaId, sinSku.id)));
+    expect(mov.origen).toBe("devolucion");
+
+    // A mano + anular solo lo que sigue por llegar.
+    const { id: manual } = await registrarDevolucion(c.empresaAId, c.usuarioAId, { fecha: "2026-11-27", tienda: { otra: "Tienda física" }, skuId: skuDev, cantidad: 1, pedidoIdExterno: null, nota: null });
+    await anularDevolucion(c.empresaAId, c.usuarioAId, manual);
+    await expect(anularDevolucion(c.empresaAId, c.usuarioAId, filas[0].id)).rejects.toBeInstanceOf(DevolucionInvalidaError);
+    // Recibida a medias no existe: la base exige condición, bodega, SKU y fecha juntas.
+    await expect(
+      dbComoEmpresa(c.empresaAId, (tx) => tx.update(devolucionesInventario).set({ estado: "recibida" }).where(eq(devolucionesInventario.id, manual)))
+    ).rejects.toThrow();
   });
 });

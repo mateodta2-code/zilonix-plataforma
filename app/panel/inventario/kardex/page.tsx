@@ -24,7 +24,7 @@ const ETIQUETA_TIPO: Record<string, { texto: string; estado: EstadoChip }> = {
   liberacion: { texto: "Liberación", estado: "neutro" },
   confirmacion: { texto: "Confirmación", estado: "peligro" },
 };
-const ETIQUETA_ORIGEN: Record<string, string> = { manual: "Manual", recepcion: "Recepción", pedido_ml: "Pedido ML", traslado: "Traslado" };
+const ETIQUETA_ORIGEN: Record<string, string> = { manual: "Manual", recepcion: "Recepción", pedido_ml: "Pedido ML", traslado: "Traslado", devolucion: "Devolución" };
 
 function conSigno(n: number): string {
   return n > 0 ? `+${n}` : String(n);
