@@ -565,3 +565,9 @@ Pruebas en `extension/background.test.ts` (url oculta, url ajena, ranking por pa
 - Pruebas con estructuras que imitan la ficha: no se pudo comparar contra una ficha real desde el entorno de desarrollo (Mercado Libre pide verificación de cuenta).
 
 **Hay que reinstalar la extensión.** Bajar el ZIP solo cuando `version.json` ya muestre 0.3.49.
+
+## v0.3.50 — más formas de leer el nombre de la tienda
+
+Cuando el link de la tienda dice «Ver tienda» (o similar) y no el nombre, `elegirVendedor` ahora prueba, en orden: el texto del link, su `title`/`aria-label`, el «Vendido por X» del bloque del vendedor (corta en MercadoLíder, «Tienda oficial», un número o «|») y el nickname del JSON incrustado (junto al `seller_id`, dentro de `seller` o `seller_name`). Sin nada confirmado, `null`: nunca se inventa. Además, «Actualizar datos» avisa **cuáles** fichas no se pudieron leer.
+
+**Hay que reinstalar la extensión.** Bajar el ZIP solo cuando `version.json` ya muestre 0.3.50.

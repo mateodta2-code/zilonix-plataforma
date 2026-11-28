@@ -733,7 +733,7 @@
     // recurso ajeno (inventarioAproximado).
     const inventarioTexto = leerInventarioMaximoDeTexto(U.textoDe([".ui-pdp-buybox__quantity__available"], doc));
     const inventario = elegirInventarioPrincipal(inventarioTexto, incrustado.inventarioSelector);
-    const vendedorLeido = elegirVendedor(recogerAnclasVendedor(doc), htmlCompleto, doc && doc.URL);
+    const vendedorLeido = elegirVendedor(recogerAnclasVendedor(doc), htmlCompleto, doc && doc.URL, recogerTextosVendedor(doc));
 
     return {
       titulo: U.textoDe(["h1.ui-pdp-title", "h1[data-testid='product-title']"], doc),
@@ -852,8 +852,37 @@
     }
   }
 
-  // Puro: anclas = [{ href, texto, enSeller }] ya sacadas del DOM.
-  function elegirVendedor(anclas, html, urlPagina) {
+  // "Vendido por ACME  MercadoLíder | +10 mil ventas" -> "ACME". Corta en
+  // la medalla, "Tienda oficial", un número, "|" o el fin del texto.
+  function nombreDeTextoVendidoPor(texto) {
+    if (typeof texto !== "string") return null;
+    const m = texto.replace(/\s+/g, " ").match(/vendid[oa]\s+por\s+(.+?)(?=\s*(?:mercadol[ií]der|tienda\s+oficial|\||\+?\d|$))/i);
+    return m ? limpiarNombreTienda(m[1]) : null;
+  }
+
+  // Nickname del vendedor en el JSON incrustado: junto al seller_id, o
+  // dentro de un objeto "seller".
+  function nombreDeJsonIncrustado(html) {
+    if (typeof html !== "string" || !html) return null;
+    const formas = [
+      /"seller"\s*:\s*\{[^{}]*?"nickname"\s*:\s*"([^"\\]{2,80})"/,
+      /"seller_id"\s*:\s*"?\d+"?[^{}]{0,300}?"nickname"\s*:\s*"([^"\\]{2,80})"/,
+      /"nickname"\s*:\s*"([^"\\]{2,80})"[^{}]{0,300}?"seller_id"\s*:\s*"?\d+/,
+      /"seller_name"\s*:\s*"([^"\\]{2,80})"/,
+    ];
+    for (const f of formas) {
+      const m = html.match(f);
+      const n = m ? limpiarNombreTienda(m[1]) : null;
+      if (n) return n;
+    }
+    return null;
+  }
+
+  // Puro: anclas = [{ href, texto, titulo, enSeller }] y textosSeller (el
+  // texto de los bloques cuya clase dice "seller") ya sacados del DOM.
+  // Nombre, en este orden: texto del link, su title/aria-label, el
+  // "Vendido por …" del bloque del vendedor, el JSON incrustado.
+  function elegirVendedor(anclas, html, urlPagina, textosSeller) {
     const lista = Array.isArray(anclas) ? anclas : [];
     const deTienda = lista.filter((a) => a && typeof a.href === "string" && PATRON_LINK_TIENDA.test(a.href));
     const orden = [...deTienda.filter((a) => a.enSeller), ...deTienda.filter((a) => !a.enSeller)];
@@ -862,7 +891,7 @@
     for (const a of orden) {
       const l = linkTiendaAbsoluto(a.href, urlPagina);
       if (!l) continue;
-      const n = limpiarNombreTienda(a.texto);
+      const n = limpiarNombreTienda(a.texto) || limpiarNombreTienda(a.titulo);
       // Un link sin nombre sirve igual como link, pero se sigue buscando uno con nombre.
       if (!link) link = l;
       if (n) {
@@ -873,9 +902,12 @@
     }
     const htmlTexto = typeof html === "string" ? html : "";
     if (!nombre) {
-      const m = htmlTexto.match(/"seller"\s*:\s*\{[^{}]*?"nickname"\s*:\s*"([^"\\]{2,80})"/);
-      nombre = m ? limpiarNombreTienda(m[1]) : null;
+      for (const t of Array.isArray(textosSeller) ? textosSeller : []) {
+        nombre = nombreDeTextoVendidoPor(t);
+        if (nombre) break;
+      }
     }
+    if (!nombre) nombre = nombreDeJsonIncrustado(htmlTexto);
     if (!link) {
       const id = leerSellerIdDeTienda(htmlTexto, null);
       const host = (() => {
@@ -891,13 +923,31 @@
     return { nombre, link };
   }
 
+  // Texto (con saltos de línea reales cuando el navegador los da) de los
+  // primeros bloques cuya clase dice "seller", para leer «Vendido por X».
+  function recogerTextosVendedor(doc) {
+    const salida = [];
+    if (!doc || typeof doc.querySelectorAll !== "function") return salida;
+    for (const el of doc.querySelectorAll('[class*="seller"]')) {
+      const t = String(el.innerText || el.textContent || "").trim();
+      if (t && /vendid[oa]\s+por/i.test(t)) salida.push(t.slice(0, 400));
+      if (salida.length >= 5) break;
+    }
+    return salida;
+  }
+
   function recogerAnclasVendedor(doc) {
     const salida = [];
     if (!doc || typeof doc.querySelectorAll !== "function") return salida;
     for (const a of doc.querySelectorAll("a[href]")) {
       const href = a.getAttribute("href") || "";
       if (!PATRON_LINK_TIENDA.test(href)) continue;
-      salida.push({ href, texto: (a.textContent || "").trim(), enSeller: Boolean(a.closest && a.closest('[class*="seller"]')) });
+      salida.push({
+        href,
+        texto: (a.textContent || "").trim(),
+        titulo: (a.getAttribute("title") || a.getAttribute("aria-label") || "").trim(),
+        enSeller: Boolean(a.closest && a.closest('[class*="seller"]')),
+      });
     }
     return salida;
   }
@@ -1506,6 +1556,7 @@
     leerSellerIdDeTienda,
     elegirVendedor,
     limpiarNombreTienda,
+    nombreDeTextoVendidoPor,
     extraerCustIdDeUrl,
     leerResenas,
     leerResenasDesdeScript,

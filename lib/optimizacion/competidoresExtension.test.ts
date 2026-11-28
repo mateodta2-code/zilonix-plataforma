@@ -221,6 +221,8 @@ describe("fusionar, quitar y validar links", () => {
     const { lista, noLeidos } = fusionarCompetidores([comp(1)], [comp(9, { leidoDeFicha: false })], "links", AHORA);
     expect(lista).toHaveLength(1);
     expect(noLeidos).toBe(1);
+    const { fallidos } = fusionarCompetidores([comp(1)], [comp(1, { leidoDeFicha: false })], "links", AHORA);
+    expect(fallidos).toEqual(["Producto 1"]);
   });
   it("quitar un competidor", () => {
     expect(quitarCompetidor([comp(1), comp(2)], "MCO100000001").map((c) => c.itemId)).toEqual(["MCO100000002"]);

@@ -328,7 +328,8 @@ function mismoCompetidor(a: CompetidorExtension, b: CompetidorExtension): boolea
   return (a.itemId !== null && a.itemId === b.itemId) || a.link === b.link;
 }
 
-export type ResultadoFusion = { lista: CompetidorExtension[]; leidos: number; noLeidos: number; conCambios: number };
+// `fallidos` = nombre de los competidores guardados cuya ficha no se pudo leer ahora (se conservan sus datos anteriores).
+export type ResultadoFusion = { lista: CompetidorExtension[]; leidos: number; noLeidos: number; conCambios: number; fallidos: string[] };
 
 // Los estimados (ventas/mes y facturación) se mueven un poco cada día
 // solo porque la publicación envejece; se avisan desde un 5 % de cambio.
@@ -406,6 +407,7 @@ export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: C
   let lista: CompetidorExtension[];
   let leidos = 0;
   let noLeidos = 0;
+  const fallidos: string[] = [];
 
   if (modo === "busqueda") {
     const manuales = guardados.filter((g) => g.manual);
@@ -426,6 +428,7 @@ export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: C
       const i = lista.findIndex((g) => mismoCompetidor(g, n));
       if (!n.leidoDeFicha) {
         noLeidos++;
+        fallidos.push(i >= 0 ? (lista[i].titulo ?? lista[i].itemId ?? lista[i].link) : (n.itemId ?? n.link));
         continue;
       }
       leidos++;
@@ -434,7 +437,7 @@ export function fusionarCompetidores(guardados: CompetidorExtension[], nuevos: C
     }
   }
   const final = lista.slice(0, MAXIMO_COMPETIDORES_EXTENSION);
-  return { lista: final, leidos, noLeidos, conCambios: final.filter((c) => c.cambios.length > 0).length };
+  return { lista: final, leidos, noLeidos, conCambios: final.filter((c) => c.cambios.length > 0).length, fallidos };
 }
 
 export function quitarCompetidor(lista: CompetidorExtension[], clave: string): CompetidorExtension[] {
