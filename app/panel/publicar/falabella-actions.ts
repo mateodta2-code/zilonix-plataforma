@@ -8,8 +8,9 @@ import { requierePermiso } from "@/lib/permisos";
 import { listarCuentasConectadas, obtenerCredenciales } from "@/lib/falabella/cuentas";
 import { aplanarHojas, obtenerArbolCategorias, obtenerAtributosCategoria, type AtributoCategoria } from "@/lib/falabella/catalogo";
 import { construirBorrador, type BorradorFalabella, type EntradaBorradorFalabella } from "@/lib/falabella/publicar-reglas";
+import type { ProductoFalabella } from "@/lib/falabella/producto";
 import { BorradorConProblemasError } from "@/lib/falabella/publicar";
-import { aprobarYCrear, avanzar, corregirRechazado, descartar } from "@/lib/falabella/publicaciones";
+import { aprobarYCrear, avanzar, corregirRechazado, descartar, estadoRealPublicacion } from "@/lib/falabella/publicaciones";
 import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
 import { llamarIA } from "@/lib/ia/proveedores";
 import { leerRespuestaCategorias, preseleccionarCategorias, promptCategoriaFalabella } from "@/lib/falabella/categorias-sugeridas";
@@ -158,5 +159,13 @@ export async function recomendarCategoriaFalabellaAction(cuentaId: string, titul
       }
     }
     return { categorias: candidatas.slice(0, 5), conIA: false };
+  });
+}
+
+// Trae de Falabella el link y el estado real de lo ya creado (solo lectura).
+export async function estadoRealFalabellaAction(id: string): Promise<Resultado<ProductoFalabella | null>> {
+  return envolver(async () => {
+    const empresaId = await empresaConPermiso("consultar", id);
+    return estadoRealPublicacion(empresaId, id);
   });
 }

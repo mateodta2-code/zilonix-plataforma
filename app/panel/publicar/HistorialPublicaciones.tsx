@@ -9,6 +9,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { Chip } from "@/components/marco/Chip";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
 import type { Cuenta } from "./CuentasDestino";
+import { FilaFalabella, useHistorialFalabella, type PublicacionFalabella } from "./HistorialFalabella";
 import { ErrorPublicacion } from "./ErrorPublicacion";
 import { borrarProductoAction } from "./actions";
 import {
@@ -277,15 +278,23 @@ function DetalleCuentaFila({ fila }: { fila: FilaDetalleCuenta }) {
 export function HistorialPublicaciones({
   productos,
   cuentas,
+  falabella = [],
   onCargar,
   onDuplicar,
 }: {
   productos: ProductoHistorial[];
+  // Publicaciones de Falabella: van en la misma tabla, mezcladas por fecha.
+  falabella?: PublicacionFalabella[];
   cuentas: Cuenta[];
   onCargar: (producto: ProductoHistorial) => void;
   onDuplicar: (producto: ProductoHistorial) => void;
 }) {
   const [expandidoId, setExpandidoId] = useState<string | null>(null);
+  const hf = useHistorialFalabella(falabella);
+  const filas = [
+    ...productos.map((p) => ({ tipo: "ml" as const, p, ts: p.creadoTs })),
+    ...falabella.map((p) => ({ tipo: "fb" as const, p, ts: p.creadoTs })),
+  ].sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
 
   return (
     <Tarjeta>
@@ -293,11 +302,25 @@ export function HistorialPublicaciones({
         <p className="zx-etiqueta">Historial</p>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>Productos publicados recientemente</h2>
         <BandasPublicando productos={productos} />
-        {productos.length === 0 ? (
+        {hf.mensaje && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{hf.mensaje}</p>}
+        {filas.length === 0 ? (
           <EstadoVacio>Todavía no se publicó ningún producto.</EstadoVacio>
         ) : (
           <Tabla encabezados={["Título", "Precio", "Estado", "", "Fecha", "Acciones"]}>
-            {productos.map((p) => {
+            {filas.map((fila) => {
+              if (fila.tipo === "fb") {
+                return (
+                  <FilaFalabella
+                    key={`fb-${fila.p.id}`}
+                    p={fila.p}
+                    h={hf}
+                    columnas={CANTIDAD_COLUMNAS}
+                    expandido={expandidoId === `fb-${fila.p.id}`}
+                    onToggle={() => setExpandidoId(expandidoId === `fb-${fila.p.id}` ? null : `fb-${fila.p.id}`)}
+                  />
+                );
+              }
+              const p = fila.p;
               const enlaces = enlacesPermalink(p.resultado, cuentas);
               const tituloTexto = p.titulo || "(sin título)";
               const expandido = expandidoId === p.id;
