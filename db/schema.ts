@@ -1974,6 +1974,63 @@ export const configuracionInventario = pgTable(
   })
 );
 
+// Proyección de inventarios — reglas de la empresa. Todo editable: cada
+// negocio decide cuántos días quiere cubrir, cuánto colchón de seguridad
+// guarda y cuánto tarda en llegarle la mercadería según cómo compra
+// (nacional, plataforma o avión). Una empresa sin fila usa los valores
+// por defecto de lib/inventario/proyeccion.ts.
+export const proyeccionConfiguracion = pgTable(
+  "proyeccion_configuracion",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    coberturaDias: integer("cobertura_dias").notNull().default(30),
+    colchonPorcentaje: integer("colchon_porcentaje").notNull().default(20),
+    // Cuántos días de ventas recientes definen "cuánto vendo por día".
+    ventanaDias: integer("ventana_dias").notNull().default(14),
+    leadNacionalDias: integer("lead_nacional_dias").notNull().default(7),
+    leadPlataformaDias: integer("lead_plataforma_dias").notNull().default(15),
+    leadAvionDias: integer("lead_avion_dias").notNull().default(25),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadaPor: uuid("actualizada_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    unaPorEmpresa: unique("proyeccion_configuracion_empresa_unica").on(t.empresaId),
+    coberturaValida: check("proyeccion_configuracion_cobertura_valida", sql`${t.coberturaDias} between 1 and 365`),
+    colchonValido: check("proyeccion_configuracion_colchon_valido", sql`${t.colchonPorcentaje} between 0 and 200`),
+    ventanaValida: check("proyeccion_configuracion_ventana_valida", sql`${t.ventanaDias} in (3, 7, 14, 20, 30)`),
+    leadsValidos: check(
+      "proyeccion_configuracion_leads_validos",
+      sql`${t.leadNacionalDias} between 0 and 365 and ${t.leadPlataformaDias} between 0 and 365 and ${t.leadAvionDias} between 0 and 365`
+    ),
+  })
+);
+
+// Cómo se compra cada SKU y, si hace falta, cuántos días tarda exactos.
+// Sin fila: ruta "plataforma" y el lead time de la empresa para esa ruta.
+export const proyeccionSku = pgTable(
+  "proyeccion_sku",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    skuId: uuid("sku_id").notNull(),
+    ruta: text("ruta").notNull().default("plataforma"),
+    // Vacío = usar el de la ruta. Un valor propio manda sobre la ruta.
+    leadTimeDias: integer("lead_time_dias"),
+    actualizadaTs: timestamp("actualizada_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    unoPorSku: unique("proyeccion_sku_empresa_sku_unico").on(t.empresaId, t.skuId),
+    delSku: foreignKey({
+      name: "proyeccion_sku_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("cascade"),
+    rutaValida: check("proyeccion_sku_ruta_valida", sql`${t.ruta} in ('nacional', 'plataforma', 'avion')`),
+    leadValido: check("proyeccion_sku_lead_valido", sql`${t.leadTimeDias} is null or ${t.leadTimeDias} between 0 and 365`),
+  })
+);
+
 // Estado del envío de stock a ML por SKU. Sirve de cola con espera
 // (debounce): cada movimiento marca pendiente_desde, y el trabajo solo
 // envía los que llevan quietos un rato, así diez movimientos seguidos
