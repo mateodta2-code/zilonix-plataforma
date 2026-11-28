@@ -1314,9 +1314,9 @@ describe("background.js — 'Analizar esta página' (tabla Análisis del nicho)"
     });
   });
 
-  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.49", async () => {
+  it("manifest: host_permissions solo seller.zilonix.com y staging, versión 0.3.50", async () => {
     const m = (await import("./manifest.json")).default as { host_permissions: string[]; version: string };
     expect(m.host_permissions).toEqual(["https://seller.zilonix.com/*", "https://web-staging-d979.up.railway.app/*"]);
-    expect(m.version).toBe("0.3.49");
+    expect(m.version).toBe("0.3.50");
   });
 });
