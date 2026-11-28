@@ -18,7 +18,11 @@ const YA_CUBIERTOS = new Set([
 // «Características de la categoría» de Falabella (el equivalente al bloque de
 // Mercado Libre). Título, descripción y portada van en «Título, descripción y
 // portada por cuenta»; precio, stock, SKU y fotos, en «Datos generales».
-export function SeccionFalabella({ cuentaId, sku }: { cuentaId: string; sku: string }) {
+function sinTildes(t: string) {
+  return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; sku: string; titulo: string }) {
   const [categoria, setCategoria] = useState<{ id: number; ruta: string } | null>(null);
   const [lista, setLista] = useState<{ id: number; ruta: string }[] | null>(null);
   const [busqueda, setBusqueda] = useState("");
@@ -51,6 +55,23 @@ export function SeccionFalabella({ cuentaId, sku }: { cuentaId: string; sku: str
     if (!lista || q.length < 2) return [];
     return lista.filter((c) => c.ruta.toLowerCase().includes(q)).slice(0, 30);
   }, [lista, busqueda]);
+
+  // Sugerencias según el título (palabras del título que aparecen en la ruta
+  // de la categoría). Evita elegir a ciegas una categoría que pide campos raros.
+  const sugeridas = useMemo(() => {
+    if (!lista) return [];
+    const palabras = sinTildes(titulo).split(/[^a-z0-9]+/).filter((w) => w.length >= 4).map((w) => w.replace(/(es|s)$/, ""));
+    if (palabras.length === 0) return [];
+    return lista
+      .map((c) => {
+        const ruta = sinTildes(c.ruta);
+        return { c, puntos: palabras.filter((w) => ruta.includes(w)).length };
+      })
+      .filter((x) => x.puntos > 0)
+      .sort((a, b) => b.puntos - a.puntos || a.c.ruta.length - b.c.ruta.length)
+      .slice(0, 6)
+      .map((x) => x.c);
+  }, [lista, titulo]);
 
   async function elegir(c: { id: number; ruta: string }) {
     setCategoria(c);
@@ -125,7 +146,10 @@ export function SeccionFalabella({ cuentaId, sku }: { cuentaId: string; sku: str
             disabled={cargando}
             onChange={(e) => setBusqueda(e.target.value)}
           />
-          {coincidencias.map((c) => (
+          {busqueda.trim().length < 2 && sugeridas.length > 0 && (
+            <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>Sugeridas según el título:</p>
+          )}
+          {(busqueda.trim().length < 2 ? sugeridas : coincidencias).map((c) => (
             <button key={c.id} type="button" className={styles.recuadroMarca} style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13, marginTop: 6 }} onClick={() => void elegir(c)}>
               {c.ruta}
             </button>

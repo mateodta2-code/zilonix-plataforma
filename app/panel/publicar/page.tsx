@@ -76,6 +76,7 @@ export default async function PublicarPage({
   const historialFalabella = (await listarPublicacionesFalabella(empresa.id)).map((p) => ({
     id: p.id,
     cuenta: nombreCuentaFalabella.get(p.cuentaFalabellaId) ?? "Falabella",
+    cuentaId: p.cuentaFalabellaId,
     sku: p.sku,
     titulo: p.titulo,
     estado: p.estado,

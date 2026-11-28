@@ -1,0 +1,2 @@
+- Los rechazos de Falabella se muestran en español, diciendo qué campo corregir.
+- Si Falabella rechaza por campos faltantes o inválidos, el historial pide esos campos (con sus opciones) para corregir y volver a borrador. La categoría de Falabella se sugiere según el título.
