@@ -156,7 +156,34 @@ export type EstadoInicialFormulario = {
   variantes: VariantesTexto | null;
   portadasPorVariante: Record<string, string>;
   modoPrueba: boolean;
+  // Solo al cargar una publicación de Falabella desde el historial: lo propio
+  // de Falabella (categoría, atributos, medidas) para precargar su sección.
+  falabella?: { categoriaId: number; atributos: Record<string, string>; medidas: { largo: number; ancho: number; alto: number; peso: number } };
 };
+
+// Cargar/Reintentar y Duplicar de una fila de FALABELLA: mismo criterio que el
+// de Mercado Libre — Reintentar deja marcada la cuenta de Falabella, Duplicar
+// la deja desmarcada; todo lo demás se copia igual. El precio de «Datos
+// generales» es la oferta (el precio normal se vuelve a calcular).
+export function construirEstadoInicialFalabella(
+  p: {
+    cuentaId: string;
+    borrador: { sku: string; titulo: string; descripcion: string; precioOferta: number; stock: number; imagenes: string[]; categoriaId: number; atributos: Record<string, string>; medidas: { largo: number; ancho: number; alto: number; peso: number } };
+  },
+  modo: "reintentar" | "duplicar"
+): EstadoInicialFormulario {
+  const b = p.borrador;
+  return {
+    ...estadoInicialVacioBase(),
+    cuentasIncluidas: modo === "reintentar" ? [p.cuentaId] : [],
+    datosPorCuenta: { [p.cuentaId]: { titulo: b.titulo, descripcion: b.descripcion, portadaUrl: b.imagenes[0] ?? "" } },
+    precio: String(b.precioOferta),
+    stock: String(b.stock),
+    sku: b.sku,
+    imagenes: b.imagenes,
+    falabella: { categoriaId: b.categoriaId, atributos: b.atributos, medidas: b.medidas },
+  };
+}
 
 // Punto 8 — "Cargar/Reintentar: carga ese producto en el formulario de
 // arriba... (solo en las cuentas que fallaron, preseleccionadas)" /

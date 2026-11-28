@@ -279,12 +279,14 @@ export function HistorialPublicaciones({
   productos,
   cuentas,
   falabella = [],
+  onCargarFalabella = () => {},
   onCargar,
   onDuplicar,
 }: {
   productos: ProductoHistorial[];
   // Publicaciones de Falabella: van en la misma tabla, mezcladas por fecha.
   falabella?: PublicacionFalabella[];
+  onCargarFalabella?: (p: PublicacionFalabella, modo: "reintentar" | "duplicar") => void;
   cuentas: Cuenta[];
   onCargar: (producto: ProductoHistorial) => void;
   onDuplicar: (producto: ProductoHistorial) => void;
@@ -315,6 +317,7 @@ export function HistorialPublicaciones({
                     p={fila.p}
                     h={hf}
                     columnas={CANTIDAD_COLUMNAS}
+                    onCargar={(modo) => onCargarFalabella(fila.p, modo)}
                     expandido={expandidoId === `fb-${fila.p.id}`}
                     onToggle={() => setExpandidoId(expandidoId === `fb-${fila.p.id}` ? null : `fb-${fila.p.id}`)}
                   />

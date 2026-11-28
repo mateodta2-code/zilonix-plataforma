@@ -1,0 +1,1 @@
+- Falabella: las filas del historial tienen Cargar/Reintentar y Duplicar (copian categoría, atributos y medidas al formulario); si no hay link, el detalle explica por qué.

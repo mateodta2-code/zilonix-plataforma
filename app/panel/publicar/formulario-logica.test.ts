@@ -824,3 +824,23 @@ describe("urlDescarga (Cloudinary fl_attachment)", () => {
     expect(urlDescarga("https://http2.mlstatic.com/a.jpg")).toBe("https://http2.mlstatic.com/a.jpg");
   });
 });
+
+import { construirEstadoInicialFalabella } from "./formulario-logica";
+
+describe("construirEstadoInicialFalabella", () => {
+  const fila = {
+    cuentaId: "cf1",
+    borrador: { sku: "FUL1234", titulo: "Bomba", descripcion: "desc", precioOferta: 37900, stock: 3, imagenes: ["https://a/1.jpg", "https://a/2.jpg"], categoriaId: 3073, atributos: { Modelo: "X" }, medidas: { largo: 20, ancho: 15, alto: 20, peso: 1 } },
+  };
+  it("reintentar deja marcada la cuenta; duplicar la deja desmarcada", () => {
+    expect(construirEstadoInicialFalabella(fila, "reintentar").cuentasIncluidas).toEqual(["cf1"]);
+    expect(construirEstadoInicialFalabella(fila, "duplicar").cuentasIncluidas).toEqual([]);
+  });
+  it("copia precio de oferta, sku, portada y lo propio de Falabella", () => {
+    const e = construirEstadoInicialFalabella(fila, "duplicar");
+    expect(e.precio).toBe("37900");
+    expect(e.sku).toBe("FUL1234");
+    expect(e.datosPorCuenta.cf1).toEqual({ titulo: "Bomba", descripcion: "desc", portadaUrl: "https://a/1.jpg" });
+    expect(e.falabella?.categoriaId).toBe(3073);
+  });
+});
