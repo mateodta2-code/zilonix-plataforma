@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
 import { publicacionesFalabella } from "@/db/schema";
 import { obtenerCredenciales } from "@/lib/falabella/cuentas";
+import { consultarProducto, type ProductoFalabella } from "@/lib/falabella/producto";
 import { consultarFeed, enviarImagenes, enviarProductCreate } from "@/lib/falabella/publicar";
 import type { BorradorFalabella } from "@/lib/falabella/publicar-reglas";
 
@@ -135,4 +136,12 @@ export async function corregirRechazado(empresaId: string, id: string, atributos
   if (!(await transicion(empresaId, id, "rechazado", { estado: "borrador", borrador, errores: [] }))) {
     throw new Error("Esta publicación ya no está rechazada.");
   }
+}
+
+// Estado real en Falabella (link a la publicación, revisión de calidad, si está
+// visible). Solo lectura: no cambia nada ni en Falabella ni en la fila local.
+export async function estadoRealPublicacion(empresaId: string, id: string): Promise<ProductoFalabella | null> {
+  const fila = await obtener(empresaId, id);
+  if (!fila) return null;
+  return consultarProducto(await obtenerCredenciales(empresaId, fila.cuentaFalabellaId), fila.sku);
 }

@@ -1,0 +1,1 @@
+- Publicar: el historial de Falabella se unió al de Mercado Libre en una sola tabla (con etiqueta de marketplace), con link a la publicación y estado real traído de Falabella.
