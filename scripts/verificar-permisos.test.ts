@@ -195,6 +195,8 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/despachos/etiquetas/route.ts",
   "app/panel/publicar/page.tsx",
   "app/panel/publicar/actions.ts",
+  // Publicar en Falabella: mismo permiso que publicar (inventario.consultar / crear).
+  "app/panel/publicar/falabella-actions.ts",
   // «Crear con IA» (PR1, textos): mismo permiso que publicar (inventario/crear).
   "app/panel/publicar/ia/actions.ts",
   // «Generar con IA» (PR2, imágenes): mismo permiso que publicar.

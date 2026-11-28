@@ -37,6 +37,8 @@ export type EntradaBorradorFalabella = {
   ahora?: Date;
 };
 
+export type EstadoPublicacionFalabella = "borrador" | "creando" | "imagenes" | "publicado" | "rechazado";
+
 export type BorradorFalabella = {
   sku: string;
   titulo: string;

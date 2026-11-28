@@ -8,7 +8,8 @@ import { requierePermiso } from "@/lib/permisos";
 import { listarCuentasConectadas, obtenerCredenciales } from "@/lib/falabella/cuentas";
 import { aplanarHojas, obtenerArbolCategorias, obtenerAtributosCategoria, type AtributoCategoria } from "@/lib/falabella/catalogo";
 import { construirBorrador, type BorradorFalabella, type EntradaBorradorFalabella } from "@/lib/falabella/publicar-reglas";
-import { consultarFeed, enviarImagenes, enviarProductCreate, BorradorConProblemasError, type EstadoFeed } from "@/lib/falabella/publicar";
+import { BorradorConProblemasError } from "@/lib/falabella/publicar";
+import { aprobarYCrear, avanzar, descartar } from "@/lib/falabella/publicaciones";
 import { FalabellaApiError, FalabellaNoDisponibleError } from "@/lib/falabella/cliente";
 
 // Fases 1 y 2 de "Publicar en Falabella". Todo pasa por aquí (servidor): la
@@ -17,6 +18,18 @@ import { FalabellaApiError, FalabellaNoDisponibleError } from "@/lib/falabella/c
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type Resultado<T> = { ok: true; datos: T } | { ok: false; error: string };
+
+async function empresaConPermiso(permiso: "consultar" | "crear" | "modificar", id: string): Promise<string> {
+  const usuario = await obtenerOCrearUsuarioActual();
+  if (!usuario) redirect("/sign-in");
+  const propias = await listarEmpresasDeUsuario(usuario.id);
+  const empresaId = cookies().get("empresa_actual")?.value;
+  const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
+  if (!empresa) throw new Error("No se encontró tu empresa activa.");
+  await requierePermiso(usuario.id, empresa.id, "inventario", permiso);
+  if (!PATRON_UUID.test(id)) throw new Error("id inválido.");
+  return empresa.id;
+}
 
 async function contexto(permiso: "consultar" | "crear", cuentaId: string) {
   const usuario = await obtenerOCrearUsuarioActual();
@@ -78,28 +91,32 @@ export async function borradorFalabellaAction(cuentaId: string, entrada: Omit<En
   });
 }
 
-// Fase 2, paso crear: recalcula el borrador en el servidor (nunca se confía
-// en uno armado por el navegador) y SOLO entonces envía. La aprobación de
-// Mateo es la acción explícita de pulsar "Crear".
-export async function crearEnFalabellaAction(cuentaId: string, entrada: Omit<EntradaBorradorFalabella, "ahora">): Promise<Resultado<{ feedId: string }>> {
+// Aprobar el borrador = crear en Falabella. El borrador ya quedó guardado y
+// recalculado en el servidor al enviar el formulario; aquí nunca se acepta
+// uno armado por el navegador.
+export async function aprobarFalabellaAction(id: string): Promise<Resultado<null>> {
   return envolver(async () => {
-    const { cred } = await contexto("crear", cuentaId);
-    return { feedId: await enviarProductCreate(cred, construirBorrador(entrada)) };
+    const empresaId = await empresaConPermiso("crear", id);
+    await aprobarYCrear(empresaId, id);
+    return null;
   });
 }
 
-export async function estadoFeedFalabellaAction(cuentaId: string, feedId: string): Promise<Resultado<EstadoFeed>> {
+// Un paso de seguimiento del feed (la pantalla lo llama cada pocos segundos
+// solo mientras hay publicaciones en proceso).
+export async function avanzarFalabellaAction(id: string): Promise<Resultado<null>> {
   return envolver(async () => {
-    const { cred } = await contexto("consultar", cuentaId);
-    return consultarFeed(cred, feedId);
+    const empresaId = await empresaConPermiso("consultar", id);
+    await avanzar(empresaId, id);
+    return null;
   });
 }
 
-// Solo después de que el feed de ProductCreate terminó sin errores.
-export async function enviarImagenesFalabellaAction(cuentaId: string, sku: string, imagenes: string[]): Promise<Resultado<{ feedId: string }>> {
+// Solo borra la fila local, nunca algo ya creado en Falabella.
+export async function descartarFalabellaAction(id: string): Promise<Resultado<null>> {
   return envolver(async () => {
-    const { cred } = await contexto("crear", cuentaId);
-    const borrador = construirBorrador({ sku, titulo: "x", descripcion: "xxxxxx", modelo: "x", precioOferta: 1, stock: 0, categoriaId: 1, imagenes });
-    return { feedId: await enviarImagenes(cred, sku, borrador.imagenes) };
+    const empresaId = await empresaConPermiso("modificar", id);
+    await descartar(empresaId, id);
+    return null;
   });
 }
