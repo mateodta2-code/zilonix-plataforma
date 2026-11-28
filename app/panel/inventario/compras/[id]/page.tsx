@@ -6,7 +6,7 @@ import { tienePermiso } from "@/lib/roles";
 import { listarBodegas } from "@/lib/inventario/bodegas";
 import { obtenerOrdenCompra } from "@/lib/inventario/compras";
 import { mostrarMonto } from "@/lib/finanzas/montos";
-import { actualizarDatosCompraAction, anularOrdenCompraAction, marcarLiquidadoAction, recibirOrdenCompraAction } from "../actions";
+import { actualizarDatosCompraAction, actualizarLineasCompraAction, anularOrdenCompraAction, marcarLiquidadoAction, recibirOrdenCompraAction } from "../actions";
 import { fechaCorta, hoyBogota, PLATAFORMAS_COMPRA } from "@/lib/inventario/registro-compras";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -50,6 +50,8 @@ export default async function OrdenCompraPage({
   const puedeEditarCompra = tienePermiso(permisos, "inventario", "crear");
   const puedeLiquidar = !orden.fechaPago && orden.estado !== "anulada" && tienePermiso(permisos, "finanzas", "modificar");
   const hoy = hoyBogota(new Date());
+  const puedeCorregirCantidad = orden.estado === "abierta";
+  const puedeCorregirValor = orden.estado !== "anulada" && !orden.fechaPago;
 
   return (
     <>
@@ -164,6 +166,46 @@ export default async function OrdenCompraPage({
             {fechaCorta(orden.fechaCompra)} · {orden.plataforma ?? "sin plataforma"} · {orden.formaPago ?? "sin forma de pago"}
             {orden.ordenPlataforma ? ` · orden ${orden.ordenPlataforma}` : ""} · entrega estimada {fechaCorta(orden.entregaEstimada)}
           </p>
+        )}
+        {/* 27-nov: corregir cantidad y valor unidad. Cantidad solo si no ha
+            llegado nada; valor solo si no está liquidada (también se revisa
+            en actualizarLineasCompra). */}
+        {puedeEditarCompra && (puedeCorregirCantidad || puedeCorregirValor) && (
+          <form action={actualizarLineasCompraAction} className={styles.form} style={{ marginTop: 12 }}>
+            <input type="hidden" name="ordenCompraId" value={orden.id} />
+            {orden.lineas.map((l, i) => (
+              <div key={l.id} className={styles.filaForm}>
+                <input type="hidden" name={`item_${i}`} value={l.id} />
+                <Campo etiqueta={orden.lineas.length > 1 ? `Cantidad · ${l.codigo}` : "Cantidad"}>
+                  <input
+                    name={`cantidad_${i}`}
+                    type="number"
+                    min={1}
+                    step={1}
+                    defaultValue={l.cantidadPedida}
+                    readOnly={!puedeCorregirCantidad}
+                    title={puedeCorregirCantidad ? undefined : "Ya llegó mercancía: la cantidad no se corrige."}
+                    className="zx-control"
+                  />
+                </Campo>
+                <Campo etiqueta={orden.lineas.length > 1 ? `Valor unidad · ${l.codigo}` : "Valor unidad"}>
+                  <input
+                    name={`valor_${i}`}
+                    inputMode="decimal"
+                    defaultValue={l.costoUnitario ?? ""}
+                    readOnly={!puedeCorregirValor}
+                    title={puedeCorregirValor ? undefined : "La compra ya está liquidada: el valor no se corrige."}
+                    className="zx-control"
+                  />
+                </Campo>
+                {i === orden.lineas.length - 1 && <Boton type="submit">Guardar cantidad y valor</Boton>}
+              </div>
+            ))}
+            <p className={styles.detalle}>
+              {puedeCorregirCantidad ? "La cantidad se corrige mientras no llegue nada." : "Ya llegó mercancía: la cantidad quedó fija."}{" "}
+              {puedeCorregirValor ? "El valor se corrige mientras no esté liquidada." : "Ya está liquidada: el valor quedó fijo."}
+            </p>
+          </form>
         )}
         {orden.linkCompra && (
           <p className={styles.detalle}>
