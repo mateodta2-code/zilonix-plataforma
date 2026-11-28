@@ -9,6 +9,9 @@ import { instruccionAlerta, listarAlertasPendientes } from "@/lib/inventario/ale
 import { leerConfiguracionInventario } from "@/lib/inventario/configuracion";
 import { calcularDiasStock, cantidadAPublicar, textoDiasStock } from "@/lib/inventario/calculos";
 import { listarInventario, listarSkusConStock, TAMANO_PAGINA_INVENTARIO } from "@/lib/inventario/stock";
+import { leerFichasProducto, type FichaProducto } from "@/lib/inventario/ficha-producto";
+import { urlFotoGrandeMl } from "@/lib/ml/imagen-ml";
+import { formatearMonto } from "@/lib/panel-kpis";
 import { ajustarStockAction, resolverAlertaAction, trasladarStockAction } from "./actions";
 import { Boton, BotonLink, clasesBoton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
@@ -21,6 +24,7 @@ import { Tarjeta } from "@/components/marco/Tarjeta";
 import { AvisosUrl } from "@/components/inventario/Avisos";
 import styles from "./inventario.module.css";
 import { SkuCopiable } from "@/components/marco/SkuCopiable";
+import { FotoConZoom } from "@/components/marco/FotoConZoom";
 
 // Issue #280 — stock por SKU y bodega (WMS Fase 1). Seller es la fuente
 // de verdad: lo que se ve acá es lo que se publica en ML (menos el
@@ -36,6 +40,9 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a esta pantalla.`} />;
   }
   const puedeMover = tienePermiso(permisos, "inventario", "modificar");
+  // Costo, venta y proveedor son de finanzas (mismo criterio que
+  // Registro de compras): sin finanzas.consultar esas columnas no salen.
+  const veFinanzas = tienePermiso(permisos, "finanzas", "consultar");
   const q = normalizarParametro(searchParams.q);
 
   const [resultado, lista, alertas, config, skusSimples] = await Promise.all([
@@ -45,6 +52,11 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
     leerConfiguracionInventario(activa.id),
     puedeMover ? listarSkusConStock(activa.id) : Promise.resolve([]),
   ]);
+  // Solo los SKU de esta página, nunca toda la empresa.
+  const fichas = await leerFichasProducto(
+    activa.id,
+    resultado.filas.map((f) => ({ id: f.skuId, codigo: f.codigo }))
+  );
   const activas = lista.filter((b) => b.activa);
   // Las columnas son las bodegas activas más las desactivadas que
   // todavía tienen algo (para no esconder stock real).
@@ -168,37 +180,70 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
         <EstadoVacio>{q ? "Ningún SKU coincide con esa búsqueda." : "Todavía no hay SKU. Créalos en la pantalla de SKU."}</EstadoVacio>
       ) : (
         <>
-          <Tabla encabezados={["SKU", ...columnas.map((b) => b.nombre), "Reservado", "Para ML", "Días de stock", "Trazabilidad"]}>
-            {resultado.filas.map((f) => (
-              <FilaTabla key={f.skuId}>
-                <CeldaTabla>
-                  <strong><SkuCopiable sku={f.codigo} /></strong> {f.esKit && <Chip>Kit</Chip>}
-                  <div className={styles.detalle}>{f.nombre}</div>
-                </CeldaTabla>
-                {columnas.map((b) => {
-                  const saldo = f.porBodega.find((x) => x.bodegaId === b.id);
-                  return (
-                    <CeldaTabla key={b.id} className={styles.numero}>
-                      {f.esKit ? "—" : (saldo?.disponible ?? 0)}
-                    </CeldaTabla>
-                  );
-                })}
-                <CeldaTabla className={styles.numero}>{f.esKit ? "—" : f.totalReservado}</CeldaTabla>
-                <CeldaTabla className={styles.numero}>
-                  <strong>{cantidadAPublicar(f.publicable, config.bufferMl)}</strong>
-                </CeldaTabla>
-                <CeldaTabla className={styles.numero}>
-                  <DiasStock esKit={f.esKit} paraMl={cantidadAPublicar(f.publicable, config.bufferMl)} vendidas30={f.vendidas30} />
-                </CeldaTabla>
-                <CeldaTabla>
-                  {!f.esKit && (
-                    <Link href={`/panel/inventario/kardex?sku=${f.skuId}`} className={styles.enlaceAviso}>
-                      Ver
-                    </Link>
+          <Tabla
+            encabezados={[
+              "Foto",
+              "Nombre",
+              "SKU",
+              ...(veFinanzas ? ["Costo", "Venta"] : []),
+              "Stock",
+              ...columnas.map((b) => b.nombre),
+              "Reservado",
+              "Para ML",
+              "Días de stock",
+              ...(veFinanzas ? ["Proveedor"] : []),
+              "Acciones",
+            ]}
+          >
+            {resultado.filas.map((f) => {
+              const ficha = fichas.get(f.skuId);
+              return (
+                <FilaTabla key={f.skuId}>
+                  <CeldaTabla>
+                    <Foto ficha={ficha} nombre={f.nombre} />
+                  </CeldaTabla>
+                  <CeldaTabla>
+                    {f.nombre} {f.esKit && <Chip>Kit</Chip>}
+                  </CeldaTabla>
+                  <CeldaTabla>
+                    <strong><SkuCopiable sku={f.codigo} /></strong>
+                  </CeldaTabla>
+                  {veFinanzas && (
+                    <>
+                      <CeldaTabla className={styles.numero}>{montoOGuion(ficha?.costo ?? null)}</CeldaTabla>
+                      <CeldaTabla className={styles.numero}>{montoOGuion(ficha?.precioVenta ?? null)}</CeldaTabla>
+                    </>
                   )}
-                </CeldaTabla>
-              </FilaTabla>
-            ))}
+                  <CeldaTabla className={styles.numero}>{f.esKit ? "—" : f.totalDisponible}</CeldaTabla>
+                  {columnas.map((b) => {
+                    const saldo = f.porBodega.find((x) => x.bodegaId === b.id);
+                    return (
+                      <CeldaTabla key={b.id} className={styles.numero}>
+                        {f.esKit ? "—" : (saldo?.disponible ?? 0)}
+                      </CeldaTabla>
+                    );
+                  })}
+                  <CeldaTabla className={styles.numero}>{f.esKit ? "—" : f.totalReservado}</CeldaTabla>
+                  <CeldaTabla className={styles.numero}>
+                    <strong>{cantidadAPublicar(f.publicable, config.bufferMl)}</strong>
+                  </CeldaTabla>
+                  <CeldaTabla className={styles.numero}>
+                    <DiasStock esKit={f.esKit} paraMl={cantidadAPublicar(f.publicable, config.bufferMl)} vendidas30={f.vendidas30} />
+                  </CeldaTabla>
+                  {veFinanzas && <CeldaTabla>{ficha?.proveedorNombre ?? "—"}</CeldaTabla>}
+                  <CeldaTabla>
+                    {/* Acá entra después el botón «Modificar» (otra tarea). */}
+                    <div className={styles.accionesFila}>
+                      {!f.esKit && (
+                        <BotonLink href={`/panel/inventario/kardex?sku=${f.skuId}`} variante="secundario" chico>
+                          Historial ingresos
+                        </BotonLink>
+                      )}
+                    </div>
+                  </CeldaTabla>
+                </FilaTabla>
+              );
+            })}
           </Tabla>
           <div className={styles.paginacion}>
             <p className={styles.resumenPaginacion}>
@@ -221,6 +266,20 @@ export default async function InventarioPage({ searchParams }: { searchParams: R
       )}
     </>
   );
+}
+
+// "0.00" es un costo real ($0); solo vacío es «—».
+function montoOGuion(monto: string | null): string {
+  return monto === null ? "—" : formatearMonto(monto);
+}
+
+// La foto sale de la última venta del SKU (pedido_items.imagen_url)
+// mientras `skus` no tenga foto propia (tarea futura con migración).
+function Foto({ ficha, nombre }: { ficha: FichaProducto | undefined; nombre: string }) {
+  if (!ficha?.fotoUrl) {
+    return <div className={`${styles.miniatura} ${styles.miniaturaVacia} ${styles.detalle}`}>Sin foto</div>;
+  }
+  return <FotoConZoom src={ficha.fotoUrl} srcAmpliada={urlFotoGrandeMl(ficha.fotoUrl)} alt={nombre} claseMiniatura={styles.miniatura} />;
 }
 
 // Un kit no tiene ritmo propio: sus ventas ya suman a los componentes.
