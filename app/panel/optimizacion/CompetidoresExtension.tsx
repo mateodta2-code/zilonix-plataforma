@@ -138,7 +138,10 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
             ? `Se actualizaron los datos de ${fusion.leidos} ${fusion.leidos === 1 ? "competidor" : "competidores"}: ${fusion.conCambios === 0 ? "ninguno cambió" : `${fusion.conCambios} con cambios`}.`
             : null
         );
-        if (fusion.noLeidos > 0) setAviso(`${fusion.noLeidos} no se pudo leer en Mercado Libre; se conservan los datos que ya tenías.`);
+        if (fusion.noLeidos > 0) {
+          const nombres = fusion.fallidos.slice(0, 5).join("; ");
+          setAviso(`No se pudo leer en Mercado Libre: ${nombres}${fusion.fallidos.length > 5 ? "…" : ""}. Se conservan los datos que ya tenías; vuelve a intentar.`);
+        }
         if (fusion.leidos === 0) return;
       }
       guardar(fusion.lista, modo === "busqueda" ? m.termino : (actual?.termino ?? TERMINO_POR_LINK), modo === "busqueda" ? m.candidatos : (actual?.candidatos ?? fusion.lista.length));
@@ -215,7 +218,7 @@ export function CompetidoresExtension({ propia, cuentaMlId, siteId, idioma, sinP
     return (
       <p className={styles.nota}>
         {motivo}. Para compararla con otras del mismo producto, instala o actualiza la extensión de Zilonix (versión
-        0.3.49 o más nueva) y recarga esta página.
+        0.3.50 o más nueva) y recarga esta página.
       </p>
     );
   }
