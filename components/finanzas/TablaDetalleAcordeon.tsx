@@ -7,8 +7,7 @@ import { Chip } from "@/components/marco/Chip";
 import { IconoChevron } from "@/components/marco/iconos";
 import { CeldaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { CeldasMontos } from "./CeldasMontos";
-import { ETIQUETA_FORMA, fechaDiaLegible, mostrarPorcentajeEntero, tonoMargen } from "./formato";
-import { mostrarMonto } from "@/lib/finanzas/montos";
+import { ETIQUETA_FORMA, fechaDiaLegible } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
 import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
@@ -57,18 +56,20 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
 
   return (
     // scroll: el encabezado queda fijo arriba de la caja al bajar (27-nov).
-    // Estilo Zilonix OS (27-nov): el día es una franja con su resumen a la
-    // derecha; la cuenta, una fila resaltada con sus totales; abajo los
-    // productos.
+    // Estilo Zilonix OS (27-nov): el día y la cuenta llevan sus totales por
+    // columna (la cuenta resaltada); abajo los productos.
     <Tabla encabezados={encabezados} grupos={grupos} scroll>
       {dias.map((dia) => {
         const diaAbierto = diasAbiertos.has(dia.dia);
         const textoDia = `${fechaDiaLegible(dia.dia)} · ${dia.numero_cuentas} ${plural(dia.numero_cuentas, "cuenta", "cuentas")} · ${dia.numero_ventas} ${plural(dia.numero_ventas, "venta", "ventas")}`;
         return (
           <Fragment key={dia.dia}>
+            {/* 27-nov: el día lleva sus totales debajo de cada columna (como
+                la cuenta). Con una sola franja y el resumen a la derecha, los
+                días cerrados dejaban las columnas vacías y todo amontonado a
+                la derecha. */}
             <tr className={estilos.filaDia}>
-              <td colSpan={encabezados.length} className={estilos.celdaDia}>
-                <div className={estilos.franjaDia}>
+              <CeldaTabla>
                 <button
                   type="button"
                   className={estilos.controlNivel}
@@ -78,27 +79,15 @@ export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExtern
                 >
                   <IconoChevron size={12} className={estilos.chevron} />
                   {/* Fecha legible y palabras completas («Vie 27 nov 2026 · 2 cuentas · 12 ventas»). */}
-                  <span className={estilos.fechaDia}>{fechaDiaLegible(dia.dia)}</span>
-                  <span className={estilos.conteoNivel}>
-                    {dia.numero_cuentas} {plural(dia.numero_cuentas, "cuenta", "cuentas")} · {dia.numero_ventas} {plural(dia.numero_ventas, "venta", "ventas")}
+                  <span className={estilos.textoNivel}>
+                    <span className={estilos.fechaDia}>{fechaDiaLegible(dia.dia)}</span>
+                    <span className={estilos.conteoNivel}>
+                      {dia.numero_cuentas} {plural(dia.numero_cuentas, "cuenta", "cuentas")} · {dia.numero_ventas} {plural(dia.numero_ventas, "venta", "ventas")}
+                    </span>
                   </span>
                 </button>
-                <span className={estilos.resumenDia}>
-                  <span className={estilos.numero}>{mostrarMonto(dia.totales.recaudo)}</span>
-                  {dia.totales.utilidad !== null && (
-                    <>
-                      <span className={estilos.separadorResumen}>·</span>
-                      <span>
-                        Utilidad: <span className={estilos.numero}>{mostrarMonto(dia.totales.utilidad)}</span>
-                      </span>
-                      <span className={`${estilos.numero} ${estilos[`margen_${tonoMargen(dia.totales.porcentaje_utilidad) ?? "sin"}`]}`}>
-                        {mostrarPorcentajeEntero(dia.totales.porcentaje_utilidad)}
-                      </span>
-                    </>
-                  )}
-                </span>
-                </div>
-              </td>
+              </CeldaTabla>
+              <CeldasMontos t={dia.totales} costo={dia.totales.costo_producto} utilidad={dia.totales.utilidad} />
             </tr>
             {diaAbierto &&
               dia.cuentas.map((cuenta) => {
