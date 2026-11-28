@@ -38,7 +38,7 @@ const SEGUNDOS_ENTRE_CONSULTAS = 20;
 // Cuántas filas publicadas se consultan solas al abrir la página para tener su link.
 const MAX_LINKS_AUTOMATICOS = 5;
 
-export type RealFalabella = ProductoFalabella | "no_encontrado" | "error" | "cargando";
+export type RealFalabella = ProductoFalabella | "no_encontrado" | { error: string } | "cargando";
 
 // Rechazo por campos faltantes o inválidos: se muestran esos mismos campos
 // (con la lista de opciones cuando la categoría la define) para llenarlos y
@@ -117,7 +117,7 @@ export function useHistorialFalabella(publicaciones: PublicacionFalabella[]) {
   async function cargarReal(id: string) {
     setReal((r) => ({ ...r, [id]: "cargando" }));
     const r = await estadoRealFalabellaAction(id);
-    setReal((x) => ({ ...x, [id]: r.ok ? (r.datos ?? "no_encontrado") : "error" }));
+    setReal((x) => ({ ...x, [id]: r.ok ? (r.datos ?? "no_encontrado") : { error: r.error } }));
   }
 
   // Los publicados más recientes traen su link solos (pocas llamadas de solo lectura).
@@ -164,10 +164,10 @@ const ETIQUETA_QC: Record<string, string> = { approved: "aprobada", pending: "en
 
 // Una publicación de Falabella como fila de la MISMA tabla del historial de
 // Mercado Libre (Título, Precio, Estado, ver detalle, Fecha, Acciones).
-export function FilaFalabella({ p, h, expandido, onToggle, columnas }: { p: PublicacionFalabella; h: EstadoHistorialFalabella; expandido: boolean; onToggle: () => void; columnas: number }) {
+export function FilaFalabella({ p, h, expandido, onToggle, columnas, onCargar }: { p: PublicacionFalabella; h: EstadoHistorialFalabella; expandido: boolean; onToggle: () => void; columnas: number; onCargar: (modo: "reintentar" | "duplicar") => void }) {
   const b = p.borrador;
   const r = h.real[p.id];
-  const datos = r && typeof r === "object" ? r : null;
+  const datos = r && typeof r === "object" && !("error" in r) ? r : null;
   const enProceso = p.estado === "creando" || p.estado === "imagenes";
 
   // Al abrir el detalle de algo ya creado, se trae su estado real.
@@ -215,6 +215,16 @@ export function FilaFalabella({ p, h, expandido, onToggle, columnas }: { p: Publ
                 Aprobar y crear en Falabella
               </Boton>
             )}
+            {!enProceso && (
+              <>
+                <Boton type="button" variante="primario" onClick={() => onCargar("reintentar")}>
+                  Cargar / Reintentar
+                </Boton>
+                <Boton type="button" variante="primario" onClick={() => onCargar("duplicar")}>
+                  Duplicar
+                </Boton>
+              </>
+            )}
             {datos?.url && (
               <a href={datos.url} target="_blank" rel="noreferrer">
                 Ver publicación ↗
@@ -251,8 +261,8 @@ export function FilaFalabella({ p, h, expandido, onToggle, columnas }: { p: Publ
                 <strong>Estado real en Falabella: </strong>
                 {r === "cargando" || !r ? (
                   "consultando…"
-                ) : r === "error" ? (
-                  "no se pudo consultar ahora."
+                ) : typeof r === "object" && "error" in r ? (
+                  `no se pudo consultar: ${r.error}`
                 ) : r === "no_encontrado" ? (
                   "Falabella todavía no lo muestra (puede tardar unos minutos en aparecer)."
                 ) : (
@@ -262,10 +272,17 @@ export function FilaFalabella({ p, h, expandido, onToggle, columnas }: { p: Publ
                     {datos?.stock != null && <> · stock {datos.stock}</>}
                     {datos?.precio != null && <> · precio {pesos(datos.precio)}</>}
                     {datos?.precioOferta ? <> · oferta {pesos(datos.precioOferta)}</> : null}{" "}
-                    {datos?.url && (
+                    {datos?.url ? (
                       <a href={datos.url} target="_blank" rel="noreferrer">
                         Ver publicación ↗
                       </a>
+                    ) : (
+                      <>
+                        Falabella aún no da el link público (suele aparecer cuando termina la revisión).{" "}
+                        <a href={`https://www.falabella.com.co/falabella-co/search?Ntt=${encodeURIComponent(p.titulo)}`} target="_blank" rel="noreferrer">
+                          Buscarlo en Falabella ↗
+                        </a>
+                      </>
                     )}
                   </>
                 )}{" "}

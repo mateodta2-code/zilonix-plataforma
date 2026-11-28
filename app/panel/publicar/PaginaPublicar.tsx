@@ -11,6 +11,7 @@ import type { PublicacionFalabella } from "./HistorialFalabella";
 import {
   construirEstadoInicial,
   construirEstadoInicialDesdeImportacion,
+  construirEstadoInicialFalabella,
   itemImportadoDesdeMensajeExtension,
   type EstadoInicialFormulario,
   type ItemImportado,
@@ -93,6 +94,13 @@ export function PaginaPublicar({
   const [formKey, setFormKey] = useState(0);
   // Subpestañas locales (no cambian de ruta): todo sigue montado para no perder el formulario.
   const [pestana, setPestana] = useState<"publicar" | "imagenes">("publicar");
+
+  function cargarFalabellaEnFormulario(p: PublicacionFalabella, modo: "reintentar" | "duplicar") {
+    setFormInicial(construirEstadoInicialFalabella(p, modo));
+    setFormKey((k) => k + 1);
+    setPestana("publicar");
+    document.getElementById("formulario-publicar")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   function cargarEnFormulario(producto: ProductoHistorial, modo: "reintentar" | "duplicar") {
     setFormInicial(construirEstadoInicial(producto, modo));
@@ -196,6 +204,7 @@ export function PaginaPublicar({
       <HistorialPublicaciones
         productos={historial}
         falabella={historialFalabella}
+        onCargarFalabella={cargarFalabellaEnFormulario}
         cuentas={cuentas}
         onCargar={(p) => cargarEnFormulario(p, "reintentar")}
         onDuplicar={(p) => cargarEnFormulario(p, "duplicar")}

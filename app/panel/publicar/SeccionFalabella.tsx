@@ -8,6 +8,7 @@ import { atributosFalabellaAction, categoriasFalabellaAction, recomendarCategori
 import type { AtributoCategoria } from "@/lib/falabella/catalogo";
 import { preseleccionarCategorias } from "@/lib/falabella/categorias-sugeridas";
 import { construirEan } from "@/lib/falabella/publicar-reglas";
+import type { EstadoInicialFormulario } from "./formulario-logica";
 import styles from "./publicar.module.css";
 
 // Campos que ya salen de «Datos generales» o de las reglas fijas: no se piden
@@ -20,15 +21,15 @@ const YA_CUBIERTOS = new Set([
 // «Características de la categoría» de Falabella (el equivalente al bloque de
 // Mercado Libre). Título, descripción y portada van en «Título, descripción y
 // portada por cuenta»; precio, stock, SKU y fotos, en «Datos generales».
-export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; sku: string; titulo: string }) {
-  const [categoria, setCategoria] = useState<{ id: number; ruta: string } | null>(null);
+export function SeccionFalabella({ cuentaId, sku, titulo, inicial }: { cuentaId: string; sku: string; titulo: string; inicial?: EstadoInicialFormulario["falabella"] }) {
+  const [categoria, setCategoria] = useState<{ id: number; ruta: string } | null>(inicial?.categoriaId ? { id: inicial.categoriaId, ruta: "" } : null);
   const [lista, setLista] = useState<{ id: number; ruta: string }[] | null>(null);
   const [busqueda, setBusqueda] = useState("");
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [atributos, setAtributos] = useState<AtributoCategoria[] | null>(null);
   const [cargandoAtributos, setCargandoAtributos] = useState(false);
-  const [valores, setValores] = useState<Record<string, string>>({});
+  const [valores, setValores] = useState<Record<string, string>>(inicial?.atributos ?? {});
 
   // Como en Mercado Libre: la lista de categorías se trae sola al abrir la
   // sección, sin botón; se filtra al escribir.
@@ -47,6 +48,24 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
       vigente = false;
     };
   }, [cuentaId]);
+
+  // Al cargar desde el historial: se traen las opciones de la categoría ya elegida
+  // y, cuando llega la lista, se completa su nombre.
+  useEffect(() => {
+    if (!inicial?.categoriaId) return;
+    setCargandoAtributos(true);
+    atributosFalabellaAction(cuentaId, inicial.categoriaId).then((r) => {
+      setCargandoAtributos(false);
+      if (r.ok) setAtributos(r.datos);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
+  }, []);
+  useEffect(() => {
+    if (!lista || !categoria || categoria.ruta) return;
+    const c = lista.find((x) => x.id === categoria.id);
+    if (c) setCategoria(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo cuando llega la lista
+  }, [lista]);
 
   const coincidencias = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -142,7 +161,7 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
       </p>
       {categoria ? (
         <p style={{ fontSize: 13, marginTop: 8 }}>
-          <strong>{categoria.ruta}</strong> <span style={{ color: "var(--texto-suave)" }}>({categoria.id})</span>{" "}
+          <strong>{categoria.ruta || `Categoría ${categoria.id}`}</strong> <span style={{ color: "var(--texto-suave)" }}>({categoria.id})</span>{" "}
           <button type="button" className="zx-enlace" onClick={() => { setCategoria(null); setAtributos(null); setValores({}); }}>
             cambiar
           </button>
@@ -208,7 +227,7 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
         ].map(([nombre, etiqueta]) => (
           <div key={nombre} style={{ flex: "1 1 100px" }}>
             <Campo etiqueta={etiqueta}>
-              <input name={nombre} type="number" step="0.01" min="0" className="zx-control" />
+              <input name={nombre} type="number" step="0.01" min="0" className="zx-control" defaultValue={inicial?.medidas?.[nombre.replace("falabella_", "") as "largo" | "ancho" | "alto" | "peso"] ?? ""} />
             </Campo>
           </div>
         ))}
