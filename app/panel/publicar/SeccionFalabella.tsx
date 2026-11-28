@@ -1,33 +1,50 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Boton } from "@/components/marco/Boton";
+import { useEffect, useMemo, useState } from "react";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { categoriasFalabellaAction } from "./falabella-actions";
-import { MAX_TITULO } from "@/lib/falabella/publicar-reglas";
+import { atributosFalabellaAction, categoriasFalabellaAction } from "./falabella-actions";
+import type { AtributoCategoria } from "@/lib/falabella/catalogo";
+import { construirEan } from "@/lib/falabella/publicar-reglas";
 import styles from "./publicar.module.css";
 
-// Se muestra solo cuando hay una cuenta de Falabella marcada en «Cuentas
-// destino». Precio (= el de Asana, es la oferta), stock, SKU y fotos salen de
-// «Datos generales»; acá va solo lo propio de Falabella. Al enviar, NO se crea
-// nada en Falabella: queda un borrador que se aprueba en el historial.
-export function SeccionFalabella({ cuentaId, tituloSugerido }: { cuentaId: string; tituloSugerido: string }) {
-  const [titulo, setTitulo] = useState("");
+// Campos que ya salen de «Datos generales» o de las reglas fijas: no se piden
+// de nuevo aunque la categoría los marque como obligatorios.
+const YA_CUBIERTOS = new Set([
+  "Name", "Description", "Brand", "SellerSku", "Price", "SpecialPrice", "Stock", "ProductId", "PrimaryCategory", "ConditionType",
+  "PackageHeight", "PackageWidth", "PackageLength", "PackageWeight", "TaxPercentage", "Status", "Variation_Name",
+]);
+
+// «Características de la categoría» de Falabella (el equivalente al bloque de
+// Mercado Libre). Título, descripción y portada van en «Título, descripción y
+// portada por cuenta»; precio, stock, SKU y fotos, en «Datos generales».
+export function SeccionFalabella({ cuentaId, sku }: { cuentaId: string; sku: string }) {
   const [categoria, setCategoria] = useState<{ id: number; ruta: string } | null>(null);
   const [lista, setLista] = useState<{ id: number; ruta: string }[] | null>(null);
   const [busqueda, setBusqueda] = useState("");
-  const [cargando, setCargando] = useState(false);
+  const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [atributos, setAtributos] = useState<AtributoCategoria[] | null>(null);
+  const [cargandoAtributos, setCargandoAtributos] = useState(false);
+  const [valores, setValores] = useState<Record<string, string>>({});
 
-  async function cargarCategorias() {
+  // Como en Mercado Libre: la lista de categorías se trae sola al abrir la
+  // sección, sin botón; se filtra al escribir.
+  useEffect(() => {
+    let vigente = true;
     setCargando(true);
-    setError(null);
-    const r = await categoriasFalabellaAction(cuentaId);
-    setCargando(false);
-    if (r.ok) setLista(r.datos);
-    else setError(r.error);
-  }
+    categoriasFalabellaAction(cuentaId).then((r) => {
+      if (!vigente) return;
+      setCargando(false);
+      if (r.ok) {
+        setLista(r.datos);
+        if (r.datos.length === 0) setError("Falabella no devolvió categorías. Avísale a soporte para revisar la respuesta.");
+      } else setError(r.error);
+    });
+    return () => {
+      vigente = false;
+    };
+  }, [cuentaId]);
 
   const coincidencias = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -35,65 +52,104 @@ export function SeccionFalabella({ cuentaId, tituloSugerido }: { cuentaId: strin
     return lista.filter((c) => c.ruta.toLowerCase().includes(q)).slice(0, 30);
   }, [lista, busqueda]);
 
+  async function elegir(c: { id: number; ruta: string }) {
+    setCategoria(c);
+    setBusqueda("");
+    setAtributos(null);
+    setValores({});
+    setCargandoAtributos(true);
+    setError(null);
+    const r = await atributosFalabellaAction(cuentaId, c.id);
+    setCargandoAtributos(false);
+    if (r.ok) setAtributos(r.datos);
+    else setError(r.error);
+  }
+
+  const modeloAtributo = atributos?.find((a) => a.nombre === "Modelo");
+  // Obligatorios de ESTA categoría (los que Falabella pide y no cubrimos ya).
+  const obligatorios = (atributos ?? []).filter((a) => a.obligatorio && a.nombre !== "Modelo" && !YA_CUBIERTOS.has(a.nombre));
+  const ean = construirEan(sku);
+
+  function campo(a: { nombre: string; etiqueta: string; opciones: string[]; obligatorio: boolean }) {
+    const v = valores[a.nombre] ?? "";
+    const poner = (x: string) => setValores((actual) => ({ ...actual, [a.nombre]: x }));
+    return (
+      <Campo key={a.nombre} etiqueta={`${a.etiqueta || a.nombre}${a.obligatorio ? " *" : ""}`}>
+        {a.opciones.length > 0 ? (
+          <select className="zx-control" value={v} onChange={(e) => poner(e.target.value)}>
+            <option value="">Elegir…</option>
+            {a.opciones.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input className="zx-control" value={v} onChange={(e) => poner(e.target.value)} />
+        )}
+      </Campo>
+    );
+  }
+
   return (
     <Tarjeta className={styles.seccion}>
-      <p className="zx-etiqueta">Falabella</p>
+      <p className="zx-etiqueta">Características de la categoría — Falabella</p>
       <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
-        Marca GENERICO, IVA 19%, 1 kg y 25×15×25 cm por defecto. El precio de arriba es la oferta (30 días); el precio normal es ese + $25.000. Se
-        guarda un borrador que tú apruebas en el historial antes de crearlo.
+        Marca GENERICO, IVA 19%, 1 kg y 25×15×25 cm por defecto. El precio de «Datos generales» es la oferta (30 días); el precio normal es ese +
+        $25.000. Se guarda un borrador que tú apruebas en el historial antes de crearlo.
+      </p>
+      <p style={{ fontSize: 13, marginTop: 8 }}>
+        Código de barras (EAN, interno de Falabella):{" "}
+        {ean ? <strong>{ean}</strong> : <span style={{ color: "var(--kpi-peligro-texto)" }}>el SKU debe terminar en 4 dígitos para armarlo (NIT + últimos 4 del SKU).</span>}
       </p>
 
-      <Campo etiqueta={`Título en Falabella (máximo ${MAX_TITULO}, sin marcas)`}>
-        <input name="falabella_titulo" className="zx-control" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
-      </Campo>
-      <p style={{ fontSize: 12, color: titulo.length > MAX_TITULO ? "var(--kpi-peligro-texto)" : "var(--texto-suave)", marginTop: 4 }}>
-        {titulo.length}/{MAX_TITULO}
-        {tituloSugerido && (
-          <>
-            {" · "}
-            <button type="button" className="zx-enlace" onClick={() => setTitulo(tituloSugerido)}>
-              Usar el título de Mercado Libre
-            </button>
-          </>
-        )}
-      </p>
-
-      <Campo etiqueta="Descripción">
-        <textarea name="falabella_descripcion" className="zx-control" rows={5} />
-      </Campo>
-
-      <Campo etiqueta="Marca real (va en el campo Modelo)">
-        <input name="falabella_modelo" className="zx-control" />
-      </Campo>
+      <input type="hidden" name="falabella_categoria" value={categoria?.id ?? ""} />
+      <input type="hidden" name="falabella_atributos" value={JSON.stringify(valores)} />
 
       <p className="zx-etiqueta" style={{ marginTop: 16 }}>
         Categoría de Falabella
       </p>
-      <input type="hidden" name="falabella_categoria" value={categoria?.id ?? ""} />
       {categoria ? (
         <p style={{ fontSize: 13, marginTop: 8 }}>
-          {categoria.ruta}{" "}
-          <button type="button" className="zx-enlace" onClick={() => setCategoria(null)}>
+          <strong>{categoria.ruta}</strong> <span style={{ color: "var(--texto-suave)" }}>({categoria.id})</span>{" "}
+          <button type="button" className="zx-enlace" onClick={() => { setCategoria(null); setAtributos(null); setValores({}); }}>
             cambiar
           </button>
         </p>
-      ) : !lista ? (
-        <div style={{ marginTop: 8 }}>
-          <Boton type="button" variante="secundario" chico onClick={cargarCategorias} disabled={cargando}>
-            {cargando ? "Cargando…" : "Buscar categoría"}
-          </Boton>
-        </div>
       ) : (
         <div style={{ marginTop: 8 }}>
-          <input className="zx-control" placeholder="Escribe al menos 2 letras (ej. biberón)" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          <input
+            className="zx-control"
+            placeholder={cargando ? "Cargando categorías de Falabella…" : "Escribe al menos 2 letras (ej. encendedor)"}
+            value={busqueda}
+            disabled={cargando}
+            onChange={(e) => setBusqueda(e.target.value)}
+          />
           {coincidencias.map((c) => (
-            <button key={c.id} type="button" className={styles.recuadroMarca} style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13, marginTop: 6 }} onClick={() => setCategoria(c)}>
+            <button key={c.id} type="button" className={styles.recuadroMarca} style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13, marginTop: 6 }} onClick={() => void elegir(c)}>
               {c.ruta}
             </button>
           ))}
         </div>
       )}
       {error && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{error}</p>}
+
+      {categoria && (
+        <>
+          <p className="zx-etiqueta" style={{ marginTop: 16 }}>
+            Atributos obligatorios de la categoría
+          </p>
+          {cargandoAtributos && <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Cargando atributos…</p>}
+          {atributos && (
+            <>
+              {/* Modelo siempre se pide: lleva la marca real. Si la categoría lo define como lista, solo acepta esas opciones. */}
+              {campo({ nombre: "Modelo", etiqueta: "Modelo (marca real del producto)", opciones: modeloAtributo?.opciones ?? [], obligatorio: true })}
+              {obligatorios.map((a) => campo(a))}
+              {obligatorios.length === 0 && <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>Esta categoría no pide más atributos obligatorios.</p>}
+            </>
+          )}
+        </>
+      )}
 
       <p className="zx-etiqueta" style={{ marginTop: 16 }}>
         Medidas reales (solo si el producto no cabe en 25×15×25 cm y 1 kg)
