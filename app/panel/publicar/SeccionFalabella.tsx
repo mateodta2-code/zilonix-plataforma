@@ -62,10 +62,15 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
     if (!lista) return [];
     const palabras = sinTildes(titulo).split(/[^a-z0-9]+/).filter((w) => w.length >= 4).map((w) => w.replace(/(es|s)$/, ""));
     if (palabras.length === 0) return [];
+    // Cada palabra pesa más cuanto más rara es entre las categorías (así «electrico»,
+    // que está en cientos, vale menos que «encendedor»), y pesa doble si cae en el nombre de la categoría final.
+    const rutas = lista.map((c) => sinTildes(c.ruta));
+    const peso = palabras.map((w) => Math.log(1 + lista.length / (1 + rutas.filter((r) => r.includes(w)).length)));
     return lista
-      .map((c) => {
-        const ruta = sinTildes(c.ruta);
-        return { c, puntos: palabras.filter((w) => ruta.includes(w)).length };
+      .map((c, i) => {
+        const hoja = sinTildes(c.ruta.split(" › ").pop() ?? "");
+        const puntos = palabras.reduce((t, w, k) => t + (rutas[i].includes(w) ? peso[k] * (hoja.includes(w) ? 2 : 1) : 0), 0);
+        return { c, puntos };
       })
       .filter((x) => x.puntos > 0)
       .sort((a, b) => b.puntos - a.puntos || a.c.ruta.length - b.c.ruta.length)
@@ -82,13 +87,23 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
     setError(null);
     const r = await atributosFalabellaAction(cuentaId, c.id);
     setCargandoAtributos(false);
-    if (r.ok) setAtributos(r.datos);
-    else setError(r.error);
+    if (r.ok) {
+      setAtributos(r.datos);
+      // País de origen: siempre China (regla de Mateo). Si es lista, se elige la opción que diga China.
+      const origen: Record<string, string> = {};
+      for (const a of r.datos) {
+        if (!/pais.*origen|origen|origin/i.test(`${a.nombre} ${a.etiqueta}`) || /ciudad|city/i.test(a.nombre)) continue;
+        const opcion = a.opciones.find((o) => /china/i.test(o));
+        if (a.opciones.length === 0) origen[a.nombre] = "China";
+        else if (opcion) origen[a.nombre] = opcion;
+      }
+      setValores(origen);
+    } else setError(r.error);
   }
 
   const modeloAtributo = atributos?.find((a) => a.nombre === "Modelo");
   // Obligatorios de ESTA categoría (los que Falabella pide y no cubrimos ya).
-  const obligatorios = (atributos ?? []).filter((a) => a.obligatorio && a.nombre !== "Modelo" && !YA_CUBIERTOS.has(a.nombre));
+  const obligatorios = (atributos ?? []).filter((a) => a.obligatorio && a.nombre !== "Modelo" && a.nombre !== "Variation" && !YA_CUBIERTOS.has(a.nombre));
   const ean = construirEan(sku);
 
   function campo(a: { nombre: string; etiqueta: string; opciones: string[]; obligatorio: boolean }) {
@@ -97,7 +112,7 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
     return (
       <Campo key={a.nombre} etiqueta={`${a.etiqueta || a.nombre}${a.obligatorio ? " *" : ""}`}>
         {a.opciones.length > 0 ? (
-          <select className="zx-control" value={v} onChange={(e) => poner(e.target.value)}>
+          <select className="zx-control" required={a.obligatorio} value={v} onChange={(e) => poner(e.target.value)}>
             <option value="">Elegir…</option>
             {a.opciones.map((o) => (
               <option key={o} value={o}>
@@ -106,7 +121,7 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
             ))}
           </select>
         ) : (
-          <input className="zx-control" value={v} onChange={(e) => poner(e.target.value)} />
+          <input className="zx-control" required={a.obligatorio} placeholder={a.nombre === "Variation" ? "Único" : undefined} value={v} onChange={(e) => poner(e.target.value)} />
         )}
       </Campo>
     );
@@ -166,8 +181,9 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
           {cargandoAtributos && <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Cargando atributos…</p>}
           {atributos && (
             <>
-              {/* Modelo siempre se pide: lleva la marca real. Si la categoría lo define como lista, solo acepta esas opciones. */}
-              {campo({ nombre: "Modelo", etiqueta: "Modelo (marca real del producto)", opciones: modeloAtributo?.opciones ?? [], obligatorio: true })}
+              {/* Modelo (marca real) solo existe en algunas categorías: si la categoría no lo trae, Falabella lo rechaza. Si es lista, solo acepta esas opciones. */}
+              {modeloAtributo && campo({ nombre: "Modelo", etiqueta: "Modelo (marca real del producto)", opciones: modeloAtributo.opciones, obligatorio: true })}
+              {campo({ nombre: "Variation", etiqueta: "Variación (déjala en «Único» si el producto no tiene variantes)", opciones: [], obligatorio: false })}
               {obligatorios.map((a) => campo(a))}
               {obligatorios.length === 0 && <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>Esta categoría no pide más atributos obligatorios.</p>}
             </>

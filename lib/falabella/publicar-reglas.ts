@@ -18,6 +18,7 @@ export const MAX_IMAGENES = 8;
 export const BODEGA_ENVIO = "Bodega_envio_01";
 // CÓDIGO de operador de Colombia en BusinessUnit (docs/products/productcreate).
 export const OPERADOR_COLOMBIA = "faco";
+export const VARIACION_UNICA = "Único";
 const MEDIDAS_POR_DEFECTO = { largo: 25, ancho: 15, alto: 25, peso: 1 };
 
 export type EntradaBorradorFalabella = {
@@ -97,7 +98,8 @@ export function construirBorrador(entrada: EntradaBorradorFalabella): BorradorFa
 
   if (!Number.isFinite(entrada.precioOferta) || entrada.precioOferta <= 0) problemas.push("Falta el precio (el de Asana).");
   if (!Number.isInteger(entrada.categoriaId) || entrada.categoriaId <= 0) problemas.push("Falta elegir la categoría de Falabella.");
-  if (!entrada.modelo.trim()) problemas.push("Falta la marca real (va en el campo Modelo).");
+  // Modelo NO se exige aquí: no todas las categorías lo tienen (Falabella rechaza
+  // «Modelo is/are not applicable»). El formulario lo pide solo si la categoría lo trae.
   if (!Number.isInteger(entrada.stock) || entrada.stock < 0) problemas.push("El stock debe ser un entero de 0 o más.");
 
   // Sin repetidas, en el orden dado: la primera es la portada.
@@ -130,7 +132,7 @@ export function construirBorrador(entrada: EntradaBorradorFalabella): BorradorFa
     iva: IVA_PORCENTAJE,
     medidas,
     imagenes: [...new Set(imagenes)],
-    atributos: { Modelo: entrada.modelo.trim(), ...entrada.atributos },
+    atributos: { ...(entrada.modelo.trim() && { Modelo: entrada.modelo.trim() }), ...entrada.atributos },
     problemas: [...new Set(problemas)],
     avisos,
   };
@@ -147,8 +149,11 @@ function esc(texto: string): string {
 const NOMBRE_TAG_SEGURO = /^[A-Za-z][A-Za-z0-9_]{0,60}$/;
 
 export function xmlProductCreate(b: BorradorFalabella): string {
+  // Variation va al nivel del producto, junto a SellerSku (no dentro de
+  // ProductData). Sin variantes reales, Falabella igual la exige: «Único».
+  const variacion = b.atributos.Variation?.trim() || VARIACION_UNICA;
   const atributos = Object.entries(b.atributos)
-    .filter(([nombre, valor]) => NOMBRE_TAG_SEGURO.test(nombre) && valor.trim())
+    .filter(([nombre, valor]) => nombre !== "Variation" && NOMBRE_TAG_SEGURO.test(nombre) && valor.trim())
     .map(([nombre, valor]) => `<${nombre}>${esc(valor)}</${nombre}>`)
     .join("");
   const descripcionSegura = b.descripcion.replace(/]]>/g, "]]]]><![CDATA[>");
@@ -156,6 +161,7 @@ export function xmlProductCreate(b: BorradorFalabella): string {
     `<?xml version="1.0" encoding="UTF-8" ?><Request><Product>` +
     `<SellerSku>${esc(b.sku)}</SellerSku>` +
     `<Name>${esc(b.titulo)}</Name>` +
+    `<Variation>${esc(variacion)}</Variation>` +
     `<PrimaryCategory>${b.categoriaId}</PrimaryCategory>` +
     `<Description><![CDATA[${descripcionSegura}]]></Description>` +
     `<Brand>${esc(b.marca)}</Brand>` +

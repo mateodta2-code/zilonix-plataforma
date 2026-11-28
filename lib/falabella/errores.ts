@@ -16,6 +16,10 @@ const REGLAS: { patron: RegExp; texto: (m: RegExpMatchArray) => string }[] = [
     texto: (m) => `«${m[2]}» no es una opción válida para «${m[1]}». Elige una de la lista que ofrece Falabella.`,
   },
   {
+    patron: /^(\w+) is\/are not applicable to (.+)$/i,
+    texto: (m) => `«${m[1]}» no aplica a la categoría «${m[2]}». Se quita al corregir; si la categoría no es la correcta, descarta y elige otra.`,
+  },
+  {
     patron: /^Field '([^']+)' (?:is|has) (?:too long|exceeds.*)\.?$/i,
     texto: (m) => `«${m[1]}» es demasiado largo para Falabella. Acórtalo.`,
   },

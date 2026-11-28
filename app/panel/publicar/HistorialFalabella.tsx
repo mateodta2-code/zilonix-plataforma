@@ -48,7 +48,8 @@ function CorregirRechazo({ p, onListo }: { p: PublicacionFalabella; onListo: (er
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- una vez por fila
   }, [p.id]);
-  if (campos.length === 0) return null;
+  const sobran = p.errores.some((e) => /is\/are not applicable/i.test(e));
+  if (campos.length === 0 && !sobran) return null;
   async function guardar() {
     setGuardando(true);
     const r = await corregirFalabellaAction(p.id, valores);
@@ -57,7 +58,7 @@ function CorregirRechazo({ p, onListo }: { p: PublicacionFalabella; onListo: (er
   }
   return (
     <div style={{ marginTop: 8 }}>
-      <p style={{ fontSize: 13, margin: "4px 0" }}>Llena lo que Falabella pidió y vuelve a enviarlo:</p>
+      <p style={{ fontSize: 13, margin: "4px 0" }}>{campos.length > 0 ? "Llena lo que Falabella pidió y vuelve a enviarlo:" : "Falabella no acepta un atributo en esta categoría; se quita al guardar."}</p>
       {campos.map((c) => (
         <label key={c} style={{ display: "block", fontSize: 13, marginTop: 6 }}>
           {c}
