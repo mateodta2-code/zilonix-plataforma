@@ -1,0 +1,1 @@
+- Devoluciones de ML: cuando una cuenta no se puede leer, el log dice el código que respondió Mercado Libre (antes solo «Error»), sin token ni datos del comprador.
