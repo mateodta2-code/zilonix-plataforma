@@ -11,6 +11,14 @@ import { HistorialPublicaciones, INTERVALO_SONDEO_MS, TOPE_SONDEO_MS, type Produ
 import type { Cuenta } from "./CuentasDestino";
 
 vi.mock("./actions", () => ({ borrarProductoAction: vi.fn() }));
+vi.mock("./falabella-actions", () => ({
+  aprobarFalabellaAction: vi.fn(),
+  atributosFalabellaAction: vi.fn(),
+  avanzarFalabellaAction: vi.fn(),
+  corregirFalabellaAction: vi.fn(),
+  descartarFalabellaAction: vi.fn(),
+  estadoRealFalabellaAction: vi.fn(),
+}));
 const { refrescar } = vi.hoisted(() => ({ refrescar: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refrescar }) }));
 
@@ -182,5 +190,34 @@ describe("HistorialPublicaciones — barra de avance (Barra-A)", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(fetchMock.mock.calls.length).toBe(llamadas);
     unmount();
+  });
+});
+
+describe("historial único con Falabella", () => {
+  it("muestra la fila de Falabella en la misma tabla con su etiqueta", () => {
+    render(
+      <HistorialPublicaciones
+        productos={[]}
+        cuentas={[]}
+        onCargar={() => {}}
+        onDuplicar={() => {}}
+        falabella={[
+          {
+            id: "f1",
+            cuenta: "zilonix falabella",
+            cuentaId: "c1",
+            sku: "FUL1234",
+            titulo: "Producto de prueba",
+            estado: "rechazado",
+            errores: [],
+            creadoTs: "2026-11-28T20:00:00Z",
+            borrador: { sku: "FUL1234", titulo: "Producto de prueba", descripcion: "x", marca: "GENERICO", ean: "1", categoriaId: 1, precioNormal: 60000, precioOferta: 35000, ofertaDesde: "2026-11-28 15:00:00", ofertaHasta: "2026-12-28 15:00:00", stock: 1, bodega: "Bodega_envio_01", iva: "19", medidas: { largo: 25, ancho: 15, alto: 25, peso: 1 }, imagenes: [], atributos: {}, problemas: [], avisos: [] },
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText("Producto de prueba")).toBeTruthy();
+    expect(screen.getByText("Falabella")).toBeTruthy();
+    expect(screen.getByText(/Rechazado/)).toBeTruthy();
   });
 });

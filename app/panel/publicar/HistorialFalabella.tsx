@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
-import { Tarjeta } from "@/components/marco/Tarjeta";
+import { Chip } from "@/components/marco/Chip";
+import { CeldaTabla, FilaTabla } from "@/components/marco/Tabla";
 import type { BorradorFalabella, EstadoPublicacionFalabella } from "@/lib/falabella/publicar-reglas";
-import { aprobarFalabellaAction, atributosFalabellaAction, avanzarFalabellaAction, corregirFalabellaAction, descartarFalabellaAction } from "./falabella-actions";
+import { aprobarFalabellaAction, atributosFalabellaAction, avanzarFalabellaAction, corregirFalabellaAction, descartarFalabellaAction, estadoRealFalabellaAction } from "./falabella-actions";
 import { camposAcorregir, traducirErrorFalabella } from "@/lib/falabella/errores";
-import styles from "./publicar.module.css";
+import type { ProductoFalabella } from "@/lib/falabella/producto";
+import { formatearFechaBogota } from "./formulario-logica";
+import { formatearMonedaIso } from "@/lib/ml/sitios";
 
 export type PublicacionFalabella = {
   id: string;
@@ -22,16 +25,20 @@ export type PublicacionFalabella = {
 };
 
 const ETIQUETA: Record<EstadoPublicacionFalabella, string> = {
-  borrador: "Borrador — falta tu aprobación",
-  creando: "Falabella está creando el producto…",
+  borrador: "Borrador",
+  creando: "Creando…",
   imagenes: "Subiendo imágenes…",
   publicado: "Publicado",
-  rechazado: "Rechazado por Falabella",
+  rechazado: "Rechazado",
 };
 
-const pesos = (n: number) => `$${n.toLocaleString("es-CO")}`;
+const pesos = (n: number) => formatearMonedaIso(n, "COP");
 
 const SEGUNDOS_ENTRE_CONSULTAS = 20;
+// Cuántas filas publicadas se consultan solas al abrir la página para tener su link.
+const MAX_LINKS_AUTOMATICOS = 5;
+
+export type RealFalabella = ProductoFalabella | "no_encontrado" | { error: string } | "cargando";
 
 // Rechazo por campos faltantes o inválidos: se muestran esos mismos campos
 // (con la lista de opciones cuando la categoría la define) para llenarlos y
@@ -85,14 +92,17 @@ function CorregirRechazo({ p, onListo }: { p: PublicacionFalabella; onListo: (er
   );
 }
 
-export function HistorialFalabella({ publicaciones }: { publicaciones: PublicacionFalabella[] }) {
+
+// Estado compartido de las filas de Falabella dentro del historial único:
+// seguimiento del feed mientras hay algo en proceso, aprobar, descartar y el
+// estado real (link, revisión) traído de Falabella.
+export function useHistorialFalabella(publicaciones: PublicacionFalabella[]) {
   const router = useRouter();
   const [pendiente, empezar] = useTransition();
   const [mensaje, setMensaje] = useState<string | null>(null);
+  const [real, setReal] = useState<Record<string, RealFalabella>>({});
   const enProceso = publicaciones.filter((p) => p.estado === "creando" || p.estado === "imagenes");
 
-  // Mientras haya algo en proceso, se consulta a Falabella cada 20 s y se
-  // refresca la lista. Se detiene solo cuando todo terminó.
   useEffect(() => {
     if (enProceso.length === 0) return;
     const ids = enProceso.map((p) => p.id);
@@ -104,6 +114,23 @@ export function HistorialFalabella({ publicaciones }: { publicaciones: Publicaci
     // eslint-disable-next-line react-hooks/exhaustive-deps -- depende solo de qué ids están en proceso
   }, [enProceso.map((p) => p.id).join(",")]);
 
+  async function cargarReal(id: string) {
+    setReal((r) => ({ ...r, [id]: "cargando" }));
+    const r = await estadoRealFalabellaAction(id);
+    setReal((x) => ({ ...x, [id]: r.ok ? (r.datos ?? "no_encontrado") : { error: r.error } }));
+  }
+
+  // Los publicados más recientes traen su link solos (pocas llamadas de solo lectura).
+  useEffect(() => {
+    publicaciones
+      .filter((p) => p.estado === "publicado")
+      .slice(0, MAX_LINKS_AUTOMATICOS)
+      .forEach((p) => {
+        if (!real[p.id]) void cargarReal(p.id);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- una vez por conjunto de publicados
+  }, [publicaciones.filter((p) => p.estado === "publicado").map((p) => p.id).join(",")]);
+
   function aprobar(id: string) {
     setMensaje(null);
     empezar(async () => {
@@ -113,91 +140,185 @@ export function HistorialFalabella({ publicaciones }: { publicaciones: Publicaci
     });
   }
 
-  function descartar(id: string) {
-    if (!window.confirm("¿Descartar? Solo borra esta fila de Zilonix; no borra nada en Falabella.")) return;
+  function descartar(p: PublicacionFalabella) {
+    if (!window.confirm(`¿Borrar "${p.titulo}" del historial? No borra nada en Falabella, solo esta fila local.`)) return;
     empezar(async () => {
-      const r = await descartarFalabellaAction(id);
+      const r = await descartarFalabellaAction(p.id);
       if (!r.ok) setMensaje(r.error);
       router.refresh();
     });
   }
 
+  return { mensaje, setMensaje, pendiente, real, cargarReal, aprobar, descartar, refrescar: () => router.refresh() };
+}
+
+export type EstadoHistorialFalabella = ReturnType<typeof useHistorialFalabella>;
+
+function chipEstado(estado: EstadoPublicacionFalabella) {
+  if (estado === "publicado") return <Chip estado="exito">✅ {ETIQUETA[estado]}</Chip>;
+  if (estado === "rechazado") return <Chip estado="peligro">❌ {ETIQUETA[estado]}</Chip>;
+  return <Chip estado="aviso">{ETIQUETA[estado]}</Chip>;
+}
+
+const ETIQUETA_QC: Record<string, string> = { approved: "aprobada", pending: "en revisión", rejected: "rechazada" };
+
+// Una publicación de Falabella como fila de la MISMA tabla del historial de
+// Mercado Libre (Título, Precio, Estado, ver detalle, Fecha, Acciones).
+export function FilaFalabella({ p, h, expandido, onToggle, columnas, onCargar }: { p: PublicacionFalabella; h: EstadoHistorialFalabella; expandido: boolean; onToggle: () => void; columnas: number; onCargar: (modo: "reintentar" | "duplicar") => void }) {
+  const b = p.borrador;
+  const r = h.real[p.id];
+  const datos = r && typeof r === "object" && !("error" in r) ? r : null;
+  const enProceso = p.estado === "creando" || p.estado === "imagenes";
+
+  // Al abrir el detalle de algo ya creado, se trae su estado real.
+  useEffect(() => {
+    if (expandido && (p.estado === "publicado" || p.estado === "imagenes") && !h.real[p.id]) void h.cargarReal(p.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir
+  }, [expandido]);
+
   return (
-    <Tarjeta className={styles.seccion}>
-      <div id="historial-falabella" />
-      <p className="zx-etiqueta">Historial de Falabella</p>
-      {mensaje && <p style={{ fontSize: 13, color: "var(--kpi-peligro-texto)", marginTop: 8 }}>{mensaje}</p>}
-      {publicaciones.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Todavía no hay publicaciones de Falabella.</p>
-      ) : (
-        publicaciones.map((p) => {
-          const b = p.borrador;
-          return (
-            <div key={p.id} className={styles.recuadroMarca} style={{ marginTop: 10 }}>
-              <p style={{ fontSize: 14, margin: 0 }}>
-                <strong>{p.titulo}</strong> · {p.sku} · {p.cuenta}
-              </p>
-              <p style={{ fontSize: 13, margin: "4px 0" }}>{ETIQUETA[p.estado]}</p>
-
-              {p.estado === "borrador" && (
-                <ul style={{ fontSize: 12, color: "var(--texto-suave)", margin: "4px 0 8px", paddingLeft: 18 }}>
-                  <li>
-                    Marca {b.marca} · Modelo {b.atributos.Modelo} · EAN {b.ean || "—"} · IVA {b.iva}%
-                  </li>
-                  <li>
-                    Precio normal {pesos(b.precioNormal)} · oferta {pesos(b.precioOferta)} ({b.ofertaDesde.slice(0, 10)} a {b.ofertaHasta.slice(0, 10)})
-                  </li>
-                  <li>
-                    Stock {b.stock} en {b.bodega} · paquete {b.medidas.largo}×{b.medidas.ancho}×{b.medidas.alto} cm, {b.medidas.peso} kg
-                  </li>
-                  <li>
-                    {b.imagenes.length} imagen(es), la primera es la portada · categoría {b.categoriaId}
-                  </li>
-                </ul>
-              )}
-              {b.avisos.map((a) => (
-                <p key={a} style={{ fontSize: 12, margin: "2px 0" }}>
-                  Aviso: {a}
-                </p>
-              ))}
-              {p.estado === "borrador" &&
-                b.problemas.map((m) => (
-                  <p key={m} style={{ fontSize: 12, margin: "2px 0", color: "var(--kpi-peligro-texto)" }}>
-                    Corregir: {m}
-                  </p>
-                ))}
-              {p.errores.map((m) => (
-                <p key={m} style={{ fontSize: 12, margin: "2px 0", color: "var(--kpi-peligro-texto)" }}>
-                  {traducirErrorFalabella(m)}
-                </p>
-              ))}
-
-              {p.estado === "rechazado" && (
-                <CorregirRechazo
-                  p={p}
-                  onListo={(e) => {
-                    if (e) setMensaje(e);
-                    router.refresh();
-                  }}
-                />
-              )}
-
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                {p.estado === "borrador" && (
-                  <Boton type="button" variante="primario" chico disabled={pendiente || b.problemas.length > 0} onClick={() => aprobar(p.id)}>
-                    Aprobar y crear en Falabella
-                  </Boton>
-                )}
-                {p.estado !== "creando" && p.estado !== "imagenes" && (
-                  <Boton type="button" variante="secundario" chico disabled={pendiente} onClick={() => descartar(p.id)}>
-                    Descartar
-                  </Boton>
-                )}
+    <Fragment>
+      <FilaTabla>
+        <CeldaTabla>
+          {datos?.url ? (
+            <a href={datos.url} target="_blank" rel="noreferrer">
+              {p.titulo}
+            </a>
+          ) : (
+            p.titulo
+          )}{" "}
+          <Chip>Falabella</Chip>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+            {p.sku} · {p.cuenta}
+          </div>
+        </CeldaTabla>
+        <CeldaTabla>
+          {pesos(b.precioOferta)}
+          <div style={{ fontSize: 12, opacity: 0.7 }}>normal {pesos(b.precioNormal)}</div>
+        </CeldaTabla>
+        <CeldaTabla>{chipEstado(p.estado)}</CeldaTabla>
+        <CeldaTabla>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expandido}
+            style={{ background: "none", border: "none", padding: 0, color: "inherit", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
+          >
+            {expandido ? "ocultar" : "ver detalle"}
+          </button>
+        </CeldaTabla>
+        <CeldaTabla>{formatearFechaBogota(p.creadoTs)}</CeldaTabla>
+        <CeldaTabla>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {p.estado === "borrador" && (
+              <Boton type="button" variante="primario" disabled={h.pendiente || b.problemas.length > 0} onClick={() => h.aprobar(p.id)}>
+                Aprobar y crear en Falabella
+              </Boton>
+            )}
+            {!enProceso && (
+              <>
+                <Boton type="button" variante="primario" onClick={() => onCargar("reintentar")}>
+                  Cargar / Reintentar
+                </Boton>
+                <Boton type="button" variante="primario" onClick={() => onCargar("duplicar")}>
+                  Duplicar
+                </Boton>
+              </>
+            )}
+            {datos?.url && (
+              <a href={datos.url} target="_blank" rel="noreferrer">
+                Ver publicación ↗
+              </a>
+            )}
+            {!enProceso && (
+              <Boton type="button" variante="fantasma" aria-label="Borrar" disabled={h.pendiente} onClick={() => h.descartar(p)}>
+                🗑
+              </Boton>
+            )}
+          </div>
+        </CeldaTabla>
+      </FilaTabla>
+      {expandido && (
+        <FilaTabla>
+          <CeldaTabla colSpan={columnas}>
+            <ul style={{ fontSize: 13, margin: "0 0 8px", paddingLeft: 18 }}>
+              <li>
+                Marca {b.marca}
+                {b.atributos.Modelo ? ` · Modelo ${b.atributos.Modelo}` : ""} · EAN {b.ean || "—"} · IVA {b.iva}%
+              </li>
+              <li>
+                Oferta {pesos(b.precioOferta)} ({b.ofertaDesde.slice(0, 10)} a {b.ofertaHasta.slice(0, 10)}) · precio normal {pesos(b.precioNormal)}
+              </li>
+              <li>
+                Stock {b.stock} en {b.bodega} · paquete {b.medidas.largo}×{b.medidas.ancho}×{b.medidas.alto} cm, {b.medidas.peso} kg
+              </li>
+              <li>
+                {b.imagenes.length} imagen(es), la primera es la portada · categoría {b.categoriaId}
+              </li>
+            </ul>
+            {(p.estado === "publicado" || p.estado === "imagenes") && (
+              <div style={{ fontSize: 13, margin: "4px 0 8px" }}>
+                <strong>Estado real en Falabella: </strong>
+                {r === "cargando" || !r ? (
+                  "consultando…"
+                ) : typeof r === "object" && "error" in r ? (
+                  `no se pudo consultar: ${r.error}`
+                ) : r === "no_encontrado" ? (
+                  "Falabella todavía no lo muestra (puede tardar unos minutos en aparecer)."
+                ) : (
+                  <>
+                    {datos?.estadoVenta ?? "—"} · {datos?.publicado === null ? "visibilidad sin dato" : datos?.publicado ? "visible al público" : "aún no visible"} · revisión de calidad:{" "}
+                    {ETIQUETA_QC[datos?.qcStatus ?? ""] ?? datos?.qcStatus ?? "sin dato"}
+                    {datos?.stock != null && <> · stock {datos.stock}</>}
+                    {datos?.precio != null && <> · precio {pesos(datos.precio)}</>}
+                    {datos?.precioOferta ? <> · oferta {pesos(datos.precioOferta)}</> : null}{" "}
+                    {datos?.url ? (
+                      <a href={datos.url} target="_blank" rel="noreferrer">
+                        Ver publicación ↗
+                      </a>
+                    ) : (
+                      <>
+                        Falabella aún no da el link público (suele aparecer cuando termina la revisión).{" "}
+                        <a href={`https://www.falabella.com.co/falabella-co/search?Ntt=${encodeURIComponent(p.titulo)}`} target="_blank" rel="noreferrer">
+                          Buscarlo en Falabella ↗
+                        </a>
+                      </>
+                    )}
+                  </>
+                )}{" "}
+                <button type="button" className="zx-enlace" onClick={() => void h.cargarReal(p.id)}>
+                  actualizar
+                </button>
               </div>
-            </div>
-          );
-        })
+            )}
+            {b.avisos.map((a) => (
+              <p key={a} style={{ fontSize: 12, margin: "2px 0" }}>
+                Aviso: {a}
+              </p>
+            ))}
+            {p.estado === "borrador" &&
+              b.problemas.map((m) => (
+                <p key={m} style={{ fontSize: 12, margin: "2px 0", color: "var(--kpi-peligro-texto)" }}>
+                  Corregir: {m}
+                </p>
+              ))}
+            {p.errores.map((m) => (
+              <p key={m} style={{ fontSize: 12, margin: "2px 0", color: "var(--kpi-peligro-texto)" }}>
+                {traducirErrorFalabella(m)}
+              </p>
+            ))}
+            {p.estado === "rechazado" && (
+              <CorregirRechazo
+                p={p}
+                onListo={(e) => {
+                  if (e) h.setMensaje(e);
+                  h.refrescar();
+                }}
+              />
+            )}
+          </CeldaTabla>
+        </FilaTabla>
       )}
-    </Tarjeta>
+    </Fragment>
   );
 }

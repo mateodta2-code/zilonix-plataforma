@@ -295,8 +295,12 @@ export async function cargarDevolucionesEmpresa(empresaId: string, opciones: { c
         candidatos.push({ cuenta, token, reclamo });
       }
     } catch (error) {
-      // Solo el nombre del error: nunca el token ni el cuerpo de ML.
-      console.warn(`[lib/ml/devoluciones] cuenta ${cuenta.id}: ${error instanceof Error ? error.name : "error"}`);
+      // Nunca el token ni el cuerpo de ML. Los errores propios de este
+      // archivo («Mercado Libre respondió 400 al listar los reclamos.»,
+      // «Id inválido…») solo traen el código: se loguean para saber por
+      // qué falla una cuenta (28-nov: las tres de sharel fallaban sin pista).
+      const detalle = error instanceof Error && error.name === "Error" && /^(Mercado Libre respondió \d{3}|Id inválido)/.test(error.message) ? ` — ${error.message}` : "";
+      console.warn(`[lib/ml/devoluciones] cuenta ${cuenta.id}: ${error instanceof Error ? error.name : "error"}${detalle}`);
       cuentasSinRevisar.push({ nickname: cuenta.nickname, motivo: motivoCuentaSinRevisar(error) });
     }
   }
