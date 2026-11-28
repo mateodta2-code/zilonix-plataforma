@@ -354,6 +354,8 @@ describe("inventario (RLS, issue #280)", () => {
         .insert(pedidos)
         .values({ empresaId: c.empresaAId, cuentaMlId, pedidoIdExterno: orden, fecha: new Date(), total: "1000.00", moneda: "COP", estado: "paid" })
         .returning({ id: pedidos.id });
+      // pedido_items cuelga de la venta financiera (pedidos_finanzas), como en crearVentaHoy.
+      await tx.insert(pedidosFinanzas).values({ empresaId: c.empresaAId, pedidoId: pedido.id, cuentaMlId, valorVenta: "1000.00", formaEntrega: "agencia" });
       await tx.insert(pedidoItems).values({ empresaId: c.empresaAId, pedidoId: pedido.id, linea: 1, itemIdExterno: "MCO9", skuCodigo: "DEV-A", skuId: skuDev, cantidad: 2, precioUnitario: "500.00", valorLinea: "1000.00", titulo: "Producto devuelto" });
     });
     const aviso = { reclamoId: "900001", ordenId: orden, fecha: "2026-11-27", estadoEnvio: "En camino", cuentaMlId };
