@@ -1,0 +1,1 @@
+- Publicar en Falabella usa la misma estructura que Mercado Libre: título, descripción y portada por cuenta (con contador de 60), SKU compartido, categorías que cargan solas y atributos obligatorios por categoría (Modelo como lista cuando la categoría lo exige). Los errores de Falabella se muestran sin códigos HTML.

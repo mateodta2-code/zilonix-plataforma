@@ -83,9 +83,22 @@ type LlamarFalabellaOpciones = {
   action: string;
   version: string;
   parametros?: Record<string, string>;
+  // Solo para las acciones de escritura de productos (ProductCreate, Image,
+  // UpdateStock...): POST con el XML en el cuerpo. Los parámetros firmados
+  // siguen yendo en la URL, el cuerpo NO entra en la firma (docs/signing-requests).
+  cuerpoXml?: string;
 };
 
-export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, version, parametros = {} }: LlamarFalabellaOpciones): Promise<T> {
+// Respuesta completa (Head + Body). Las acciones asíncronas de feed
+// (ProductCreate, Image, UpdateStock) devuelven el Body vacío: lo único útil
+// es Head.RequestId, que es el FeedID para consultar con FeedStatus.
+export type RespuestaFalabella<T> = { Head: { RequestId?: string; RequestAction?: string }; Body: T };
+
+export async function llamarFalabella<T>(opciones: LlamarFalabellaOpciones): Promise<T> {
+  return (await llamarFalabellaCompleto<T>(opciones)).Body;
+}
+
+export async function llamarFalabellaCompleto<T>({ userId, apiKey, sellerId, action, version, parametros = {}, cuerpoXml }: LlamarFalabellaOpciones): Promise<RespuestaFalabella<T>> {
   const base: Record<string, string> = {
     Action: action,
     Format: "JSON",
@@ -111,8 +124,10 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}?${query.toString()}`, {
-    method: "GET",
+    method: cuerpoXml === undefined ? "GET" : "POST",
+    body: cuerpoXml,
     headers: {
+      ...(cuerpoXml === undefined ? {} : { "Content-Type": "application/xml" }),
       // Formato exigido por developers.falabella.com/docs/signing-requests:
       // SELLER_ID/TECNOLOGÍA/VERSIÓN/TIPO_INTEGRACIÓN/CÓDIGO_PAÍS (issue
       // #422 — antes iba "ZilonixSeller/1.0/API", que no sigue ese orden).
@@ -136,12 +151,19 @@ export async function llamarFalabella<T>({ userId, apiKey, sellerId, action, ver
   }
   if (cuerpo.ErrorResponse) {
     const err = cuerpo.ErrorResponse;
-    throw new FalabellaApiError(String(err.ErrorCode ?? "desconocido"), String(err.ErrorMessage ?? "Error desconocido de Falabella."));
+    // La documentación pone ErrorCode/ErrorMessage dentro de Head; la
+    // respuesta de GetOrders ya confirmada los trae arriba. Se aceptan ambos.
+    const codigo = err.ErrorCode ?? err.Head?.ErrorCode ?? "desconocido";
+    const mensaje = err.ErrorMessage ?? err.Head?.ErrorMessage ?? "Error desconocido de Falabella.";
+    // ErrorDetail (hasta 50) dice QUÉ campo/SKU falló — sin esto el usuario
+    // solo vería "Format Error Detected".
+    const detalles = [err.Body?.ErrorDetail].flat().filter(Boolean).slice(0, 5).map((d: { Field?: string; Message?: string }) => [d.Field, d.Message].filter(Boolean).join(": "));
+    throw new FalabellaApiError(String(codigo), detalles.length ? `${mensaje} (${detalles.join("; ")})` : String(mensaje));
   }
   if (!cuerpo.SuccessResponse) {
     throw new FalabellaNoDisponibleError( `Falabella respondió ${res.status} sin SuccessResponse ni ErrorResponse.`);
   }
-  return cuerpo.SuccessResponse.Body as T;
+  return { Head: cuerpo.SuccessResponse.Head ?? {}, Body: cuerpo.SuccessResponse.Body as T };
 }
 
 // Revisión del PR #415 (bloqueante 1): antes se guardaba la cuenta sin

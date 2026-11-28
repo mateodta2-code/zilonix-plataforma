@@ -93,8 +93,8 @@ export default async function ConciliacionFalabellaPage() {
           </Tabla>
         )}
       </Tarjeta>
-      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
-        Volver a Finanzas
+      <BotonLink href="/panel/finanzas/por-cobrar" variante="fantasma" className={styles.volver}>
+        Volver a Por cobrar
       </BotonLink>
     </>
   );

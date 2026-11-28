@@ -6,7 +6,8 @@ import { tienePermiso } from "@/lib/roles";
 import { listarBodegas } from "@/lib/inventario/bodegas";
 import { obtenerOrdenCompra } from "@/lib/inventario/compras";
 import { mostrarMonto } from "@/lib/finanzas/montos";
-import { anularOrdenCompraAction, recibirOrdenCompraAction } from "../actions";
+import { actualizarDatosCompraAction, actualizarLineasCompraAction, anularOrdenCompraAction, marcarLiquidadoAction, recibirOrdenCompraAction } from "../actions";
+import { fechaCorta, hoyBogota, PLATAFORMAS_COMPRA } from "@/lib/inventario/registro-compras";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip } from "@/components/marco/Chip";
@@ -43,6 +44,14 @@ export default async function OrdenCompraPage({
   const puedeRecibir = abierta && tienePermiso(permisos, "inventario", "crear");
   const puedeAnular = orden.estado === "abierta" && tienePermiso(permisos, "inventario", "anular");
   const bodegasActivas = puedeRecibir ? await listarBodegas(activa.id, { soloActivas: true }) : [];
+  // Registro de compras (27-nov): datos de la compra en la plataforma
+  // (inventario.crear) y «Liquidado» (finanzas.modificar, igual que en
+  // Finanzas → Por pagar). También se revisa adentro de cada acción.
+  const puedeEditarCompra = tienePermiso(permisos, "inventario", "crear");
+  const puedeLiquidar = !orden.fechaPago && orden.estado !== "anulada" && tienePermiso(permisos, "finanzas", "modificar");
+  const hoy = hoyBogota(new Date());
+  const puedeCorregirCantidad = orden.estado === "abierta";
+  const puedeCorregirValor = orden.estado !== "anulada" && !orden.fechaPago;
 
   return (
     <>
@@ -117,9 +126,122 @@ export default async function OrdenCompraPage({
         </Tabla>
       )}
 
+      <div style={{ height: 16 }} />
+      <Tarjeta>
+        <h2 className={styles.tituloSeccion}>Datos de la compra</h2>
+        {puedeEditarCompra ? (
+          <form action={actualizarDatosCompraAction} className={styles.form}>
+            <input type="hidden" name="ordenCompraId" value={orden.id} />
+            <div className={styles.filaForm}>
+              <Campo etiqueta="Fecha de compra">
+                <input type="date" name="fechaCompra" defaultValue={orden.fechaCompra ?? ""} className="zx-control" />
+              </Campo>
+              <Campo etiqueta="Forma de pago">
+                <input name="formaPago" defaultValue={orden.formaPago ?? ""} maxLength={60} className="zx-control" />
+              </Campo>
+              <Campo etiqueta="Plataforma">
+                <input name="plataforma" list="plataformas-oc" defaultValue={orden.plataforma ?? ""} maxLength={40} className="zx-control" />
+                <datalist id="plataformas-oc">
+                  {PLATAFORMAS_COMPRA.map((p) => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
+              </Campo>
+            </div>
+            <div className={styles.filaForm}>
+              <Campo etiqueta="Orden de compra (de la plataforma)">
+                <input name="ordenPlataforma" defaultValue={orden.ordenPlataforma ?? ""} maxLength={80} className="zx-control" />
+              </Campo>
+              <Campo etiqueta="Link de compra">
+                <input name="linkCompra" type="url" defaultValue={orden.linkCompra ?? ""} maxLength={500} placeholder="https://…" className="zx-control" />
+              </Campo>
+              <Campo etiqueta="Entrega estimada">
+                <input name="entregaEstimada" type="date" defaultValue={orden.entregaEstimada ?? ""} className="zx-control" />
+              </Campo>
+              <Boton type="submit">Guardar datos</Boton>
+            </div>
+          </form>
+        ) : (
+          <p className={styles.detalle}>
+            {fechaCorta(orden.fechaCompra)} · {orden.plataforma ?? "sin plataforma"} · {orden.formaPago ?? "sin forma de pago"}
+            {orden.ordenPlataforma ? ` · orden ${orden.ordenPlataforma}` : ""} · entrega estimada {fechaCorta(orden.entregaEstimada)}
+          </p>
+        )}
+        {/* 27-nov: corregir cantidad y valor unidad. Cantidad solo si no ha
+            llegado nada; valor solo si no está liquidada (también se revisa
+            en actualizarLineasCompra). */}
+        {puedeEditarCompra && (puedeCorregirCantidad || puedeCorregirValor) && (
+          <form action={actualizarLineasCompraAction} className={styles.form} style={{ marginTop: 12 }}>
+            <input type="hidden" name="ordenCompraId" value={orden.id} />
+            {orden.lineas.map((l, i) => (
+              <div key={l.id} className={styles.filaForm}>
+                <input type="hidden" name={`item_${i}`} value={l.id} />
+                <Campo etiqueta={orden.lineas.length > 1 ? `Cantidad · ${l.codigo}` : "Cantidad"}>
+                  <input
+                    name={`cantidad_${i}`}
+                    type="number"
+                    min={1}
+                    step={1}
+                    defaultValue={l.cantidadPedida}
+                    readOnly={!puedeCorregirCantidad}
+                    title={puedeCorregirCantidad ? undefined : "Ya llegó mercancía: la cantidad no se corrige."}
+                    className="zx-control"
+                  />
+                </Campo>
+                <Campo etiqueta={orden.lineas.length > 1 ? `Valor unidad · ${l.codigo}` : "Valor unidad"}>
+                  <input
+                    name={`valor_${i}`}
+                    inputMode="decimal"
+                    defaultValue={l.costoUnitario ?? ""}
+                    readOnly={!puedeCorregirValor}
+                    title={puedeCorregirValor ? undefined : "La compra ya está liquidada: el valor no se corrige."}
+                    className="zx-control"
+                  />
+                </Campo>
+                {i === orden.lineas.length - 1 && <Boton type="submit">Guardar cantidad y valor</Boton>}
+              </div>
+            ))}
+            <p className={styles.detalle}>
+              {puedeCorregirCantidad ? "La cantidad se corrige mientras no llegue nada." : "Ya llegó mercancía: la cantidad quedó fija."}{" "}
+              {puedeCorregirValor ? "El valor se corrige mientras no esté liquidada." : "Ya está liquidada: el valor quedó fijo."}
+            </p>
+          </form>
+        )}
+        {orden.linkCompra && (
+          <p className={styles.detalle}>
+            <a href={orden.linkCompra} target="_blank" rel="noopener noreferrer" className={styles.enlaceAviso}>
+              Abrir el link de compra
+            </a>
+          </p>
+        )}
+
+        <h2 className={styles.tituloSeccion} style={{ marginTop: 16 }}>
+          Liquidado
+        </h2>
+        {orden.fechaPago ? (
+          <p className={styles.detalle}>
+            Liquidado el {fechaCorta(orden.fechaPago)}
+            {orden.medioPago ? ` · ${orden.medioPago}` : ""}.
+          </p>
+        ) : puedeLiquidar ? (
+          <form action={marcarLiquidadoAction} className={styles.filaForm}>
+            <input type="hidden" name="ordenCompraId" value={orden.id} />
+            <Campo etiqueta="Fecha en que se liquidó">
+              <input type="date" name="fechaPago" defaultValue={hoy} required className="zx-control" />
+            </Campo>
+            <Campo etiqueta="Medio">
+              <input name="medioPago" defaultValue={orden.formaPago ?? ""} maxLength={60} className="zx-control" />
+            </Campo>
+            <Boton type="submit">Marcar liquidado</Boton>
+          </form>
+        ) : (
+          <p className={styles.detalle}>Pendiente de liquidar.</p>
+        )}
+      </Tarjeta>
+
       <div className={styles.filaForm} style={{ marginTop: 16 }}>
         <BotonLink href="/panel/inventario/compras" variante="fantasma">
-          Volver a órdenes
+          Volver al registro
         </BotonLink>
         {puedeAnular && (
           <form action={anularOrdenCompraAction}>

@@ -624,3 +624,123 @@
   font-size: 12px;
   color: var(--texto-suave);
 }
+
+/* Foto de competidor: miniatura clicable, vista previa al pasar el mouse
+   y visor al hacer clic. */
+.fotoBoton {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.fotoVista {
+  position: fixed;
+  z-index: 60;
+  width: 280px;
+  height: 280px;
+  padding: 6px;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-boton);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.fotoVista img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.fotoVisor {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.75);
+  cursor: zoom-out;
+}
+
+.fotoVisor img {
+  max-width: min(92vw, 900px);
+  max-height: 88vh;
+  object-fit: contain;
+  background: #fff;
+  border-radius: var(--radio-boton);
+}
+
+.fotoCerrar {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  font-size: 28px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+/* Cuánto se parece el competidor a la publicación propia. */
+.parecidoAlto {
+  color: var(--exito-texto);
+}
+
+.parecidoBajo {
+  color: var(--peligro-texto);
+}
+
+.accionesCompetidor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.estadoCompetidor {
+  font-size: 11px;
+  color: var(--texto-suave);
+}
+
+/* Qué cambió en un competidor desde la lectura anterior. */
+.cambios {
+  margin: 4px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--texto);
+}
+
+.resumenCambios {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  background: var(--acento-suave);
+  border-radius: var(--radio-boton);
+}
+
+.resumenCambios ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.resumenCambios ul ul {
+  list-style: none;
+  padding-left: 4px;
+  font-weight: 600;
+}

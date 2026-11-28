@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { type AnyPgColumn, boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { TokenCifrado } from "@/lib/cifrado";
+import type { BorradorFalabella, EstadoPublicacionFalabella } from "@/lib/falabella/publicar-reglas";
 import type { ReglasAdicionales } from "@/lib/ml/promocionesReglasTexto";
 import type {
   DatosPorCuenta,
@@ -711,6 +712,47 @@ export const cuentasFalabella = pgTable(
     // referenciadas. Así una empresa nunca cuelga un movimiento de la
     // cuenta de otra aunque conozca su uuid (el chequeo de FK no pasa por RLS).
     empresaIdUnica: unique("cuentas_falabella_empresa_id_unica").on(t.empresaId, t.id),
+  })
+);
+
+// Publicar en Falabella (28/11/2026) — historial igual al de Mercado Libre
+// (productos_ml): una fila por producto y por cuenta de Falabella. El flujo
+// es borrador (Mateo lo revisa) → creando (feed de ProductCreate) →
+// imagenes (feed de Image) → publicado, o rechazado con el motivo que dé
+// Falabella. `borrador` guarda lo calculado con las reglas de Mateo
+// (lib/falabella/publicar-reglas.ts), nunca la API Key.
+export const publicacionesFalabella = pgTable(
+  "publicaciones_falabella",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    cuentaFalabellaId: uuid("cuenta_falabella_id").notNull(),
+    sku: text("sku").notNull(),
+    titulo: text("titulo").notNull(),
+    borrador: jsonb("borrador").$type<BorradorFalabella>().notNull(),
+    estado: text("estado").$type<EstadoPublicacionFalabella>().notNull().default("borrador"),
+    feedProductoId: text("feed_producto_id"),
+    feedImagenesId: text("feed_imagenes_id"),
+    // Motivos de rechazo dados por Falabella (por campo), máximo 10.
+    errores: jsonb("errores").$type<string[]>().notNull().default([]),
+    creadoPorUsuarioId: uuid("creado_por_usuario_id").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // FK compuesta: una empresa nunca cuelga una publicación de la cuenta
+    // de otra (el chequeo de FK no pasa por RLS) — mismo criterio que
+    // movimientos_marketplace.
+    cuentaDeLaEmpresa: foreignKey({
+      columns: [t.empresaId, t.cuentaFalabellaId],
+      foreignColumns: [cuentasFalabella.empresaId, cuentasFalabella.id],
+      name: "publicaciones_falabella_cuenta_empresa_fk",
+    }),
+    estadoValido: check(
+      "publicaciones_falabella_estado_valido",
+      sql`${t.estado} IN ('borrador', 'creando', 'imagenes', 'publicado', 'rechazado')`
+    ),
+    porEmpresa: index("publicaciones_falabella_empresa_creado_idx").on(t.empresaId, t.creadoTs),
   })
 );
 
@@ -1737,7 +1779,9 @@ export const tipoMovimientoEnum = pgEnum("tipo_movimiento", [
 ]);
 // De dónde viene el movimiento: lo que dispara un pedido de ML nunca
 // se confunde con un ajuste a mano.
-export const origenMovimientoEnum = pgEnum("origen_movimiento", ["manual", "recepcion", "pedido_ml", "traslado"]);
+// «devolucion» (28-nov): la mercancía que vuelve de un cliente y se
+// recibe en Productos → Devoluciones (devoluciones_inventario).
+export const origenMovimientoEnum = pgEnum("origen_movimiento", ["manual", "recepcion", "pedido_ml", "traslado", "devolucion"]);
 
 // Kardex append-only. Cada fila guarda el cambio (delta) y el saldo que
 // quedó después, así una auditoría no tiene que recalcular nada.
@@ -1825,6 +1869,18 @@ export const ordenesCompra = pgTable(
     // recepción: una orden se puede pagar antes de que llegue.
     fechaPago: date("fecha_pago", { mode: "string" }),
     medioPago: text("medio_pago"),
+    // Registro de compras (27-nov, como la hoja «PRODUCTOS COMPRADOS» del
+    // Zilonix OS): datos de la compra en la plataforma. Todos opcionales:
+    // las OC de antes no los tienen. fecha_compra vacía = se muestra la
+    // fecha de creación. forma_pago es la tarjeta o cuenta con que se
+    // pagó al comprar (texto: las tarjetas de crédito no son cuentas de
+    // Disponible); el pago al proveedor sigue en fecha_pago/medio_pago.
+    fechaCompra: date("fecha_compra", { mode: "string" }),
+    formaPago: text("forma_pago"),
+    plataforma: text("plataforma"),
+    ordenPlataforma: text("orden_plataforma"),
+    linkCompra: text("link_compra"),
+    entregaEstimada: date("entrega_estimada", { mode: "string" }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
@@ -1832,6 +1888,12 @@ export const ordenesCompra = pgTable(
   (t) => ({
     // Un medio de pago sin fecha de pago no dice nada: o las dos o ninguna.
     medioConFecha: check("ordenes_compra_medio_con_fecha", sql`${t.medioPago} is null or ${t.fechaPago} is not null`),
+    // Topes de los textos del Registro de compras (la app valida antes;
+    // esto es la red). El link solo http(s): nunca javascript: ni data:.
+    formaPagoLargo: check("ordenes_compra_forma_pago_largo", sql`${t.formaPago} is null or char_length(${t.formaPago}) between 1 and 60`),
+    plataformaLargo: check("ordenes_compra_plataforma_largo", sql`${t.plataforma} is null or char_length(${t.plataforma}) between 1 and 40`),
+    ordenPlataformaLargo: check("ordenes_compra_orden_plataforma_largo", sql`${t.ordenPlataforma} is null or char_length(${t.ordenPlataforma}) between 1 and 80`),
+    linkCompraHttp: check("ordenes_compra_link_compra_http", sql`${t.linkCompra} is null or (${t.linkCompra} ~* '^https?://' and char_length(${t.linkCompra}) <= 500)`),
     empresaIdUnica: unique("ordenes_compra_empresa_id_unica").on(t.empresaId, t.id),
     numeroUnico: unique("ordenes_compra_empresa_numero_unico").on(t.empresaId, t.numero),
     delTercero: foreignKey({
@@ -1937,6 +1999,86 @@ export const recepcionItems = pgTable(
       foreignColumns: [ordenCompraItems.empresaId, ordenCompraItems.id],
     }).onDelete("restrict"),
     cantidadPositiva: check("recepcion_items_cantidad_positiva", sql`${t.cantidad} > 0`),
+  })
+);
+
+// Productos → Devoluciones (28-nov): la mercancía que vuelve de un
+// cliente. Las de Mercado Libre entran solas como «por llegar» (al traer
+// las devoluciones con envío de vuelta en camino o entregado); las demás
+// (Falabella, otra tienda) se registran a mano. Al recibirla se elige su
+// estado: «bueno» suma al stock de la bodega elegida y «averiado» a la
+// bodega «Averiados» (que no suma a lo publicado en ML). Nada del
+// comprador se guarda: solo el número de orden y el del reclamo.
+export const estadoDevolucionInventarioEnum = pgEnum("estado_devolucion_inventario", ["por_llegar", "recibida", "anulada"]);
+export const condicionDevolucionEnum = pgEnum("condicion_devolucion", ["bueno", "averiado"]);
+
+export const devolucionesInventario = pgTable(
+  "devoluciones_inventario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    empresaId: uuid("empresa_id").notNull().references(() => empresas.id, { onDelete: "cascade" }),
+    // Día del aviso (o de la devolución en ML), en Bogotá.
+    fecha: date("fecha", { mode: "string" }).notNull(),
+    // Tienda: una cuenta de ML, una de Falabella u otra escrita a mano.
+    // FK compuesta en cascada, como pedidos: un SET NULL de la pareja
+    // (empresa_id, cuenta) pondría en nulo también empresa_id.
+    cuentaMlId: uuid("cuenta_ml_id"),
+    cuentaFalabellaId: uuid("cuenta_falabella_id"),
+    tiendaOtra: text("tienda_otra"),
+    // Reclamo de ML y línea de la orden: la clave para no traer dos veces
+    // la misma devolución. Vacío en las registradas a mano.
+    reclamoIdMl: text("reclamo_id_ml"),
+    lineaPedido: integer("linea_pedido").notNull().default(0),
+    pedidoIdExterno: text("pedido_id_externo"),
+    // Estado del envío de vuelta según ML («en camino», «entregado»…),
+    // solo para mostrar; se refresca al volver a traer.
+    estadoEnvioMl: text("estado_envio_ml"),
+    // Vacío si la venta no tenía SKU: se elige al recibir.
+    skuId: uuid("sku_id"),
+    producto: text("producto").notNull(),
+    cantidad: integer("cantidad").notNull(),
+    estado: estadoDevolucionInventarioEnum("estado").notNull().default("por_llegar"),
+    condicion: condicionDevolucionEnum("condicion"),
+    bodegaId: uuid("bodega_id"),
+    nota: text("nota"),
+    recibidaTs: timestamp("recibida_ts", { withTimezone: true }),
+    recibidaPor: uuid("recibida_por").references(() => usuarios.id, { onDelete: "set null" }),
+    creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
+    creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    empresaIdUnica: unique("devoluciones_inventario_empresa_id_unica").on(t.empresaId, t.id),
+    reclamoUnico: uniqueIndex("devoluciones_inventario_reclamo_unico")
+      .on(t.empresaId, t.reclamoIdMl, t.lineaPedido)
+      .where(sql`${t.reclamoIdMl} is not null`),
+    delSku: foreignKey({
+      name: "devoluciones_inventario_sku_misma_empresa_fk",
+      columns: [t.empresaId, t.skuId],
+      foreignColumns: [skus.empresaId, skus.id],
+    }).onDelete("restrict"),
+    deLaBodega: foreignKey({
+      name: "devoluciones_inventario_bodega_misma_empresa_fk",
+      columns: [t.empresaId, t.bodegaId],
+      foreignColumns: [bodegas.empresaId, bodegas.id],
+    }).onDelete("restrict"),
+    deLaCuentaMl: foreignKey({
+      name: "devoluciones_inventario_cuenta_ml_misma_empresa_fk",
+      columns: [t.empresaId, t.cuentaMlId],
+      foreignColumns: [cuentasMl.empresaId, cuentasMl.id],
+    }).onDelete("cascade"),
+    deLaCuentaFalabella: foreignKey({
+      name: "devoluciones_inventario_cuenta_falabella_misma_empresa_fk",
+      columns: [t.empresaId, t.cuentaFalabellaId],
+      foreignColumns: [cuentasFalabella.empresaId, cuentasFalabella.id],
+    }).onDelete("cascade"),
+    cantidadPositiva: check("devoluciones_inventario_cantidad_positiva", sql`${t.cantidad} > 0`),
+    productoNoVacio: check("devoluciones_inventario_producto_no_vacio", sql`btrim(${t.producto}) <> '' and char_length(${t.producto}) <= 300`),
+    tiendaOtraLargo: check("devoluciones_inventario_tienda_otra_largo", sql`${t.tiendaOtra} is null or char_length(${t.tiendaOtra}) between 1 and 60`),
+    // Recibida = tiene estado del producto, bodega, SKU y fecha; si no, ninguno.
+    recibidaCompleta: check(
+      "devoluciones_inventario_recibida_completa",
+      sql`(${t.estado} = 'recibida') = (${t.condicion} is not null and ${t.bodegaId} is not null and ${t.skuId} is not null and ${t.recibidaTs} is not null)`
+    ),
   })
 );
 

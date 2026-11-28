@@ -25,7 +25,6 @@ const APP_DIR = join(RAIZ, "app");
 // Rutas que SÍ deben llamar requierePermiso() en su propio código.
 const RUTAS_PROTEGIDAS = new Set([
   "app/panel/page.tsx",
-  "app/panel/finanzas/page.tsx",
   // Issue #128 (Z-FIN-06) — ver pide finanzas.consultar; crear, editar,
   // desactivar e importar, finanzas.modificar (también en cada acción).
   "app/panel/finanzas/proveedores/page.tsx",
@@ -123,6 +122,7 @@ const RUTAS_PROTEGIDAS = new Set([
   // Submódulos de Productos en construcción: no leen datos, pero piden
   // inventario.consultar igual que el menú.
   "app/panel/inventario/devoluciones/page.tsx",
+  "app/panel/inventario/devoluciones/actions.ts",
   "app/panel/inventario/full/page.tsx",
   "app/panel/inventario/proyeccion/page.tsx",
   "app/panel/inventario/proyeccion/actions.ts",
@@ -198,6 +198,8 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/api/ml/despachos/etiquetas/route.ts",
   "app/panel/publicar/page.tsx",
   "app/panel/publicar/actions.ts",
+  // Publicar en Falabella: mismo permiso que publicar (inventario.consultar / crear).
+  "app/panel/publicar/falabella-actions.ts",
   // «Crear con IA» (PR1, textos): mismo permiso que publicar (inventario/crear).
   "app/panel/publicar/ia/actions.ts",
   // «Generar con IA» (PR2, imágenes): mismo permiso que publicar.
@@ -426,6 +428,8 @@ const RUTAS_EXENTAS: Record<string, string> = {
   // redirect sigue existiendo solo por compatibilidad con un link
   // viejo, nunca lee ni escribe nada.
   "app/panel/publicar/clip/page.tsx": "módulo de Clip retirado; queda solo un redirect hacia /panel/publicar — nunca lee ni escribe nada, el permiso real se revisa en /panel/publicar",
+  // «Resumen» de Finanzas retirado (sus cifras ya están en Inicio).
+  "app/panel/finanzas/page.tsx": "Resumen de Finanzas retirado; queda solo un redirect hacia /panel/finanzas/ventas — nunca lee ni escribe nada, el permiso real se revisa en /panel/finanzas/ventas",
   // Issue #318 (Ley 1581) — exportar o borrar los datos propios no es
   // un permiso de MÓDULO que un rol pueda dar o quitar (como
   // "inventario.crear"): es un derecho sobre los datos de la propia

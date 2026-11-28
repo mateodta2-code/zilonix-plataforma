@@ -153,7 +153,9 @@ export const GUIA: GrupoGuia[] = [
           "SKU: crea tus productos (uno por uno o importando un CSV) y vincula cada publicación de Mercado Libre con su SKU.",
           "Bodegas: registra dónde guardas la mercancía (si todavía no tienes ninguna, Inventario te muestra el enlace «Ir a Bodegas»). La principal es la primera que se usa para reservar pedidos.",
           "Inventario: ve el stock por bodega y haz ajustes o traslados. «Para ML» es lo que se publica.",
-          "Registro de compras: registra lo que le pediste a un proveedor; al recibir, el stock sube solo.",
+          "Registro de compras: cada producto que compras es una fila con fecha, cantidad, total, forma de pago, plataforma, SKU, liquidado, orden y link de la plataforma, y entrega estimada. En «+ Agregar compra» elige un SKU que ya existe o crea el producto: el SKU se sugiere solo (FUL + letras + números) y lo puedes cambiar. Busca por producto, SKU, plataforma, OC u orden.",
+          "Devoluciones: «Traer devoluciones de Mercado Libre» trae solas las que vienen en camino o ya se entregaron (últimos 60 días), con SKU, nombre y cantidad de la venta; las de Falabella u otra tienda se registran a mano. Al recibirla eliges si llegó bueno (suma al stock de la bodega que elijas) o averiado (entra a la bodega «Averiados», que no suma a lo publicado en ML).",
+          "Para recibir la mercancía abre su OC (columna OC): al registrar la recepción el stock sube y el kardex dice de qué OC vinieron las unidades. Ahí mismo corriges los datos de la compra, la cantidad (mientras no llegue nada) y el valor unidad (mientras no esté liquidada), y la marcas como liquidada.",
           "Trazabilidad de inventario: el historial de cada movimiento, con quién lo hizo. No se edita ni se borra.",
           "Devoluciones, Inventario Full y Proyección de inventarios: en construcción.",
         ],
@@ -300,9 +302,9 @@ export const GUIA: GrupoGuia[] = [
         paraQue: "Saber cuánto ganas de verdad: ventas, recaudo y utilidad del mes.",
         pasos: [
           "Tabla maestra de SKU: carga costo, packing, envío de agencia y precio mínimo de cada SKU (a mano o importando).",
-          "Proveedores y transportadores: el packing se pone una vez y cada SKU lo toma de su proveedor.",
-          "Ventas y utilidad: la utilidad de cada venta antes de publicidad (recaudo − comisión − flete − costo − packing − envío). Filtra por fechas hasta 1 año de una vez: salen todos los días del rango en una caja con barra para bajar. El nombre del producto se puede seleccionar y copiar; el número de pedido (#…) abre el detalle de la venta. Usa «Buscar SKU, orden o producto» para ver solo esas ventas. El % de utilidad sale con semáforo: verde desde 30 %, naranja de 15 % a 29 % y rojo por debajo de 15 %. En el detalle, pasa el mouse por el nombre de cada columna para ver qué es; la utilidad sale en verde si ganas y en rojo si pierdes, y en una venta «falta costo» el link «Cargar costo» te lleva a la Tabla maestra con ese SKU.",
-          "Falabella: carga el reporte y concilia cada corte de pago.",
+          "Proveedores y transportadores (en Finanzas → Configuración): el packing se pone una vez y cada SKU lo toma de su proveedor.",
+          "Ventas y utilidad: la utilidad de cada venta antes de publicidad (recaudo − comisión − flete − costo − packing − envío). Filtra por fechas hasta 1 año de una vez: salen todos los días del rango en una caja con barra para bajar. El nombre del producto se puede seleccionar y copiar; el número de pedido (#…) abre el detalle de la venta. Usa «Buscar SKU, orden o producto» para ver solo esas ventas. El % de utilidad sale con semáforo: verde desde 30 %, naranja de 15 % a 29 % y rojo por debajo de 15 %. La pestaña Falabella tiene el mismo buscador y el mismo semáforo; al buscar no se suman los cobros sin orden (publicidad). En el detalle, pasa el mouse por el nombre de cada columna para ver qué es; la utilidad sale en verde si ganas y en rojo si pierdes, y en una venta «falta costo» el link «Cargar costo» te lleva a la Tabla maestra con ese SKU. Las ventas canceladas, con reembolso (total o parcial) o con reclamo de devolución en Productos → Devoluciones no suman a la utilidad: salen en la pestaña «Canceladas y devoluciones».",
+          "Falabella (botón «Conciliación Falabella» en Finanzas → Por cobrar): carga el reporte y concilia cada corte de pago.",
         ],
         consejos: [
           "Revisa «SKU sin costo»: sus ventas quedan fuera de la utilidad hasta que tengan costo. Zilonix no inventa ningún número.",

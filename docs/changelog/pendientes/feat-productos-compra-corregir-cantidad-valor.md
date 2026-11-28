@@ -1,0 +1,1 @@
+- Registro de compras: en el detalle de la OC se corrigen la cantidad (mientras no llegue nada) y el valor unidad (mientras no esté liquidada), con auditoría.

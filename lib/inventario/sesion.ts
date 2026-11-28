@@ -9,6 +9,9 @@ import { CompraInvalidaError } from "@/lib/inventario/compras";
 import { AlertaNoPendienteError } from "@/lib/inventario/alertas";
 import { ConfiguracionInventarioInvalidaError } from "@/lib/inventario/configuracion";
 import { MontoInvalidoError } from "@/lib/finanzas/montos";
+import { DatosCompraInvalidosError } from "@/lib/inventario/registro-compras";
+import { DevolucionInvalidaError } from "@/lib/inventario/devoluciones";
+import { SkuCodigoDuplicadoError } from "@/lib/ml/sku";
 
 // Issue #280 — lo que repiten las Server Actions de inventario: quién
 // está y en qué empresa (mismo criterio que app/panel/sku/actions.ts).
@@ -37,7 +40,10 @@ export function mensajeParaPersona(error: unknown): string | null {
     error instanceof CompraInvalidaError ||
     error instanceof AlertaNoPendienteError ||
     error instanceof ConfiguracionInventarioInvalidaError ||
-    error instanceof MontoInvalidoError
+    error instanceof MontoInvalidoError ||
+    error instanceof DatosCompraInvalidosError ||
+    error instanceof SkuCodigoDuplicadoError ||
+    error instanceof DevolucionInvalidaError
   ) {
     return error.message;
   }

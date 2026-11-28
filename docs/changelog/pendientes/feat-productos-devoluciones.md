@@ -1,0 +1,5 @@
+- Productos → Devoluciones (antes «en construcción»): tabla con fecha, SKU, nombre, cantidad, estado (por llegar / recibida / anulada), bueno o averiado, tienda y orden, con buscador.
+- «Traer devoluciones de Mercado Libre»: con la misma lectura de Posventa → Devoluciones (solo GET documentados), trae las de los últimos 60 días con el envío de vuelta en camino o entregado como «por llegar»; el SKU, nombre y cantidad salen de la venta guardada en Zilonix. Idempotente (no duplica) y refresca el estado del envío.
+- Registrar a mano (Falabella u otra tienda) y anular lo que sigue por llegar.
+- Recibir: «bueno» suma al stock de la bodega elegida; «averiado» entra a la bodega «Averiados» (se crea sola, no suma a lo publicado en ML). Kardex con origen nuevo «devolucion».
+- Migración 0060: tabla `devoluciones_inventario` (RLS por empresa, sin DELETE para app_user, FKs compuestas, CHECK de recibida completa) y valor `devolucion` en `origen_movimiento`.

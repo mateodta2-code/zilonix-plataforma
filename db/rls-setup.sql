@@ -28,7 +28,7 @@ GRANT CONNECT ON DATABASE railway TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   empresas, usuarios, roles, membresias, permisos_rol, invitaciones, accesos_temporales, cuentas_ml, avisos_ml,
-  cuentas_falabella, pedidos_falabella,
+  cuentas_falabella, pedidos_falabella, publicaciones_falabella,
   -- Issue #422 (Bloque 1) — conector OAuth de Mercado Pago.
   cuentas_mp,
   pedidos, publicaciones, importaciones_ml, skus, kit_componentes, pedido_eventos, despachos_ml, productos_ml,
@@ -65,6 +65,10 @@ GRANT UPDATE (anulada_ts) ON ventas_correcciones TO app_user;
 GRANT SELECT, INSERT, UPDATE ON bodegas, stock_bodega, ordenes_compra, orden_compra_items,
   configuracion_inventario, sync_stock_ml, alertas_ultima_unidad TO app_user;
 GRANT SELECT, INSERT ON kardex_movimientos, recepciones, recepcion_items TO app_user;
+-- Productos → Devoluciones (28-nov): se crea, se recibe o se anula; nunca
+-- se borra (la recepción ya movió el kardex).
+GRANT SELECT, INSERT, UPDATE ON devoluciones_inventario TO app_user;
+REVOKE DELETE ON devoluciones_inventario FROM app_user;
 -- Proyección de inventarios: reglas y días de entrega editables por la
 -- empresa. Se editan (UPDATE) pero no se borran: sin fila vale el
 -- valor por defecto.
@@ -296,6 +300,8 @@ ALTER TABLE ordenes_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordenes_compra FORCE ROW LEVEL SECURITY;
 ALTER TABLE orden_compra_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orden_compra_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE devoluciones_inventario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE devoluciones_inventario FORCE ROW LEVEL SECURITY;
 ALTER TABLE recepciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recepciones FORCE ROW LEVEL SECURITY;
 ALTER TABLE recepcion_items ENABLE ROW LEVEL SECURITY;
@@ -348,6 +354,8 @@ ALTER TABLE cuentas_falabella ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cuentas_falabella FORCE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_falabella ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos_falabella FORCE ROW LEVEL SECURITY;
+ALTER TABLE publicaciones_falabella ENABLE ROW LEVEL SECURITY;
+ALTER TABLE publicaciones_falabella FORCE ROW LEVEL SECURITY;
 -- Issue #422 (Bloque 1) — conector OAuth de Mercado Pago, mismo criterio
 -- simple que cuentas_falabella.
 ALTER TABLE cuentas_mp ENABLE ROW LEVEL SECURITY;
@@ -565,6 +573,9 @@ CREATE POLICY aislamiento_stock_bodega ON stock_bodega
 DROP POLICY IF EXISTS aislamiento_kardex_movimientos ON kardex_movimientos;
 CREATE POLICY aislamiento_kardex_movimientos ON kardex_movimientos
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_devoluciones_inventario ON devoluciones_inventario;
+CREATE POLICY aislamiento_devoluciones_inventario ON devoluciones_inventario
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_ordenes_compra ON ordenes_compra;
 CREATE POLICY aislamiento_ordenes_compra ON ordenes_compra
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
@@ -710,6 +721,10 @@ CREATE POLICY aislamiento_pedidos ON pedidos
 
 DROP POLICY IF EXISTS aislamiento_cuentas_falabella ON cuentas_falabella;
 CREATE POLICY aislamiento_cuentas_falabella ON cuentas_falabella
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+
+DROP POLICY IF EXISTS aislamiento_publicaciones_falabella ON publicaciones_falabella;
+CREATE POLICY aislamiento_publicaciones_falabella ON publicaciones_falabella
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 
 DROP POLICY IF EXISTS aislamiento_cuentas_mp ON cuentas_mp;

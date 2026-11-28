@@ -9,10 +9,12 @@ import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { CeldaTabla, FilaTabla, Tabla, type EncabezadoTabla, type GrupoEncabezado } from "@/components/marco/Tabla";
 import { EstadoVacio } from "@/components/marco/EstadoVacio";
+import { Pestanas } from "@/components/marco/Pestanas";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasMes } from "./BotonTraerVentasMes";
 import { CeldasMontos } from "./CeldasMontos";
 import { TablaDetalleAcordeon } from "./TablaDetalleAcordeon";
+import { TablaFueraDeUtilidad } from "./TablaFueraDeUtilidad";
 import { AYUDA_COLUMNAS, mostrarPorcentaje } from "./formato";
 import estilos from "./ventasUtilidad.module.css";
 
@@ -28,6 +30,10 @@ import estilos from "./ventasUtilidad.module.css";
 // mostrarResumen={false}: sin tarjetas KPI ni «Total por cuenta» (esos
 // indicadores van a Inicio, #143/#163); Finanzas → Ventas los sigue
 // mostrando.
+//
+// Pestaña «Canceladas y devoluciones» (28-nov, solo Finanzas → Ventas,
+// mostrarFueraDeUtilidad): las ventas que no suman a la utilidad, con
+// los mismos filtros de cuenta, fechas y buscador (?vista=canceladas).
 //
 // La tabla día → cuenta → producto es un acordeón cliente
 // (TablaDetalleAcordeon.tsx): acá se calcula todo y allá solo vive qué
@@ -85,7 +91,11 @@ type Props = {
   // Tope del rango de fechas. Finanzas → Ventas pasa 1 año; Pedidos
   // se queda con el de siempre (31 días).
   rangoMaximoDias?: number;
+  // Pestañas «Ventas» / «Canceladas y devoluciones». Solo Finanzas → Ventas.
+  mostrarFueraDeUtilidad?: boolean;
 };
+
+const VISTA_CANCELADAS = "canceladas";
 
 export async function DetalleDiaCuentaProducto({
   empresaId,
@@ -97,6 +107,7 @@ export async function DetalleDiaCuentaProducto({
   acciones,
   mensajeVacio,
   rangoMaximoDias,
+  mostrarFueraDeUtilidad = false,
 }: Props) {
   const cuentas = await listarCuentasMlParaSelector(empresaId);
   let puedeTraerVentas = true;
@@ -116,6 +127,7 @@ export async function DetalleDiaCuentaProducto({
   // «q»: Pedidos ya usa «q» para su propia lista).
   const buscarTexto = (normalizarParametro(searchParams.buscar) ?? "").slice(0, 120);
   const buscar = normalizarBusqueda(buscarTexto);
+  const verCanceladas = mostrarFueraDeUtilidad && normalizarParametro(searchParams.vista) === VISTA_CANCELADAS;
 
   let datos: ResultadoVentasUtilidad | null = null;
   let errorRango = rango.error ?? null;
@@ -138,6 +150,18 @@ export async function DetalleDiaCuentaProducto({
   const hastaForm = rango.rango?.hasta ?? normalizarParametro(searchParams.hasta) ?? "";
   const filtros: FiltrosUrlVentas = { cuenta: cuentaId ?? undefined, desde: desdeForm, hasta: hastaForm, costo, buscar: buscar ?? undefined };
   const hrefMesActual = Object.keys(extra).length > 0 ? `${ruta}?${new URLSearchParams(extra).toString()}` : ruta;
+  // Cambiar de pestaña conserva los filtros.
+  const hrefVista = (canceladas: boolean) => {
+    const params = new URLSearchParams(extra);
+    if (filtros.cuenta) params.set(PARAM_CUENTA, filtros.cuenta);
+    if (filtros.desde) params.set("desde", filtros.desde);
+    if (filtros.hasta) params.set("hasta", filtros.hasta);
+    if (filtros.costo) params.set("costo", filtros.costo);
+    if (buscarTexto) params.set("buscar", buscarTexto);
+    if (canceladas) params.set("vista", VISTA_CANCELADAS);
+    const query = params.toString();
+    return query ? `${ruta}?${query}` : ruta;
+  };
 
   const total = datos?.detalle.total;
   const dias = datos?.detalle.dias ?? [];
@@ -145,7 +169,6 @@ export async function DetalleDiaCuentaProducto({
   // caja con barra para bajar (<Tabla scroll>, encabezado fijo); los días
   // arrancan cerrados salvo el más nuevo, así que el alto lo da el
   // número de días, no el de ventas.
-  const conDevolucion = new Set(datos?.conDevolucion ?? []);
   // Al acordeón (cliente) solo viajan los pedidos del rango.
   const idsRango = new Set(dias.flatMap((d) => d.cuentas.flatMap((c) => c.productos.map((p) => p.pedido_id))));
   const pedidoIdExternoRango = Object.fromEntries([...idsRango].map((id) => [id, datos?.pedidoIdExterno[id] ?? ""]));
@@ -160,6 +183,7 @@ export async function DetalleDiaCuentaProducto({
         {Object.entries(extra).map(([nombre, valor]) => (
           <input key={nombre} type="hidden" name={nombre} value={valor} />
         ))}
+        {verCanceladas && <input type="hidden" name="vista" value={VISTA_CANCELADAS} />}
         <Campo etiqueta="Cuenta de Mercado Libre">
           <select name={PARAM_CUENTA} defaultValue={cuentaId ?? "todas"} className="zx-control">
             <option value="todas">Todas</option>
@@ -201,7 +225,18 @@ export async function DetalleDiaCuentaProducto({
 
       {errorRango && <p className={estilos.avisoError}>{errorRango}</p>}
 
-      {datos && total && (
+      {datos && mostrarFueraDeUtilidad && (
+        <Pestanas
+          pestanas={[
+            { etiqueta: `Ventas (${datos.detalle.total.ventas})`, href: hrefVista(false), activa: !verCanceladas },
+            { etiqueta: `Canceladas y devoluciones (${datos.fueraDeUtilidad.length})`, href: hrefVista(true), activa: verCanceladas },
+          ]}
+        />
+      )}
+
+      {datos && verCanceladas && <TablaFueraDeUtilidad ventas={datos.fueraDeUtilidad} buscarTexto={buscarTexto} />}
+
+      {datos && total && !verCanceladas && (
         <>
           {mostrarResumen && (
             <div className={estilos.gridKpi}>
@@ -289,7 +324,6 @@ export async function DetalleDiaCuentaProducto({
                     grupos={GRUPOS_DETALLE}
                     dias={dias}
                     pedidoIdExterno={pedidoIdExternoRango}
-                    conDevolucion={[...conDevolucion].filter((id) => idsRango.has(id))}
                   />
                 </div>
                 <p className={estilos.suave}>

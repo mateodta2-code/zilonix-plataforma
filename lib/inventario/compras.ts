@@ -1,11 +1,15 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { bodegas, ordenCompraItems, ordenesCompra, recepcionItems, recepciones, skus, terceros } from "@/db/schema";
+import { bodegas, cuentasDisponible, ordenCompraItems, ordenesCompra, recepcionItems, recepciones, skus, terceros } from "@/db/schema";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { esUuid, validarCantidad } from "@/lib/inventario/calculos";
 import { aplicarMovimientosTx, SkuNoValidoParaStockError } from "@/lib/inventario/movimientos";
 import { validarMonto } from "@/lib/finanzas/montos";
+import { aCentavos } from "@/lib/finanzas/utilidad-venta";
+import { patronBusquedaLike } from "@/lib/filtros-listado";
+import { SkuCodigoDuplicadoError } from "@/lib/ml/sku";
+import { notaRecepcion, validarCodigoSku, validarDatosCompra, type DatosCompra } from "@/lib/inventario/registro-compras";
 
 // Issue #280 — compras simples: una orden de compra (OC) con sus SKU y
 // la recepción de lo que de verdad llegó, contra una OC o directa. La
@@ -43,43 +47,295 @@ export async function crearOrdenCompra(
   const lineas = datos.lineas.map((l) => ({ ...l, costoUnitario: validarMonto(l.costoUnitario, "Costo unitario") }));
 
   return dbComoEmpresa(empresaId, async (tx) => {
-    const [bodega] = await tx
-      .select({ id: bodegas.id, activa: bodegas.activa })
-      .from(bodegas)
-      .where(and(eq(bodegas.empresaId, empresaId), eq(bodegas.id, datos.bodegaDestinoId)));
-    if (!bodega?.activa) throw new CompraInvalidaError("La bodega de destino no existe o está desactivada.");
-    if (datos.terceroId) {
-      const [t] = await tx.select({ id: terceros.id }).from(terceros).where(and(eq(terceros.empresaId, empresaId), eq(terceros.id, datos.terceroId)));
-      if (!t) throw new CompraInvalidaError("Ese proveedor no existe en esta empresa.");
-    }
     await validarSkusSimplesTx(tx, empresaId, lineas.map((l) => l.skuId));
+    return insertarOrdenTx(tx, empresaId, usuarioId, { ...datos, compra: null }, lineas);
+  });
+}
 
-    // Consecutivo por empresa. Dos OC creadas en el mismo instante
-    // chocan con el único (empresa, número) y la segunda falla: se
-    // bloquea la empresa un momento para que no pase.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ordenes_compra:${empresaId}`}))`);
-    const [{ siguiente }] = await tx
-      .select({ siguiente: sql<number>`coalesce(max(${ordenesCompra.numero}), 0)::int + 1` })
-      .from(ordenesCompra)
-      .where(eq(ordenesCompra.empresaId, empresaId));
-    const [orden] = await tx
-      .insert(ordenesCompra)
-      .values({ empresaId, numero: Number(siguiente), terceroId: datos.terceroId, bodegaDestinoId: datos.bodegaDestinoId, nota: datos.nota, creadoPor: usuarioId })
-      .returning({ id: ordenesCompra.id, numero: ordenesCompra.numero });
-    await tx.insert(ordenCompraItems).values(
-      lineas.map((l) => ({ empresaId, ordenCompraId: orden.id, skuId: l.skuId, cantidadPedida: l.cantidad, costoUnitario: l.costoUnitario }))
+type LineaOcValida = { skuId: string; cantidad: number; costoUnitario: string | null };
+
+// Bodega, proveedor, consecutivo, la OC y sus líneas, y la auditoría: lo
+// comparten la OC de varios SKU (crearOrdenCompra) y el Registro de
+// compras (registrarCompra, un producto por fila).
+async function insertarOrdenTx(
+  tx: typeof db,
+  empresaId: string,
+  usuarioId: string,
+  datos: { terceroId: string | null; bodegaDestinoId: string; nota: string | null; compra: DatosCompra | null },
+  lineas: LineaOcValida[]
+): Promise<{ id: string; numero: number }> {
+  const [bodega] = await tx
+    .select({ id: bodegas.id, activa: bodegas.activa })
+    .from(bodegas)
+    .where(and(eq(bodegas.empresaId, empresaId), eq(bodegas.id, datos.bodegaDestinoId)));
+  if (!bodega?.activa) throw new CompraInvalidaError("La bodega de destino no existe o está desactivada.");
+  if (datos.terceroId) {
+    const [t] = await tx.select({ id: terceros.id }).from(terceros).where(and(eq(terceros.empresaId, empresaId), eq(terceros.id, datos.terceroId)));
+    if (!t) throw new CompraInvalidaError("Ese proveedor no existe en esta empresa.");
+  }
+
+  // Consecutivo por empresa. Dos OC creadas en el mismo instante
+  // chocan con el único (empresa, número) y la segunda falla: se
+  // bloquea la empresa un momento para que no pase.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ordenes_compra:${empresaId}`}))`);
+  const [{ siguiente }] = await tx
+    .select({ siguiente: sql<number>`coalesce(max(${ordenesCompra.numero}), 0)::int + 1` })
+    .from(ordenesCompra)
+    .where(eq(ordenesCompra.empresaId, empresaId));
+  const [orden] = await tx
+    .insert(ordenesCompra)
+    .values({
+      empresaId,
+      numero: Number(siguiente),
+      terceroId: datos.terceroId,
+      bodegaDestinoId: datos.bodegaDestinoId,
+      nota: datos.nota,
+      creadoPor: usuarioId,
+      ...(datos.compra ?? {}),
+    })
+    .returning({ id: ordenesCompra.id, numero: ordenesCompra.numero });
+  await tx.insert(ordenCompraItems).values(
+    lineas.map((l) => ({ empresaId, ordenCompraId: orden.id, skuId: l.skuId, cantidadPedida: l.cantidad, costoUnitario: l.costoUnitario }))
+  );
+  await registrarAuditoria(tx, {
+    empresaId,
+    usuarioId,
+    actorTipo: "persona",
+    accion: "inventario.orden_compra_creada",
+    entidad: "ordenes_compra",
+    entidadId: orden.id,
+    detalle: `OC-${orden.numero} con ${lineas.length} SKU.`,
+  });
+  return orden;
+}
+
+// Registro de compras (27-nov) — una fila = un producto comprado, como la
+// hoja del Zilonix OS. Si el producto es nuevo, su SKU se crea en la
+// MISMA transacción: si algo de la compra falla, no queda un SKU suelto.
+export async function registrarCompra(
+  empresaId: string,
+  usuarioId: string,
+  datos: {
+    producto: { skuId: string } | { nuevo: { codigo: string; nombre: string } };
+    cantidad: number;
+    costoUnitario: string | null;
+    bodegaDestinoId: string;
+    terceroId: string | null;
+    nota: string | null;
+    compra: Partial<DatosCompra>;
+  }
+): Promise<{ id: string; numero: number }> {
+  if (!esUuid(datos.bodegaDestinoId)) throw new CompraInvalidaError("Elige la bodega de destino.");
+  if (datos.terceroId !== null && !esUuid(datos.terceroId)) throw new CompraInvalidaError("Ese proveedor no existe en esta empresa.");
+  validarCantidad("entrada", datos.cantidad);
+  const costoUnitario = validarMonto(datos.costoUnitario, "Valor unidad");
+  const compra = validarDatosCompra(datos.compra);
+  const nuevo =
+    "nuevo" in datos.producto
+      ? (() => {
+          const nombre = datos.producto.nuevo.nombre.trim().replace(/\s+/g, " ");
+          if (nombre.length < 2 || nombre.length > 200) throw new CompraInvalidaError("Escribe el nombre del producto (de 2 a 200 caracteres).");
+          return { codigo: validarCodigoSku(datos.producto.nuevo.codigo), nombre };
+        })()
+      : null;
+  if (!nuevo && !esUuid((datos.producto as { skuId: string }).skuId)) throw new SkuNoValidoParaStockError("Elige un SKU de la lista o crea el producto.");
+
+  return dbComoEmpresa(empresaId, async (tx) => {
+    let skuId: string;
+    if (nuevo) {
+      try {
+        const [fila] = await tx.insert(skus).values({ empresaId, codigo: nuevo.codigo, nombre: nuevo.nombre }).returning({ id: skus.id });
+        skuId = fila.id;
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "23505") throw new SkuCodigoDuplicadoError(nuevo.codigo);
+        throw error;
+      }
+      await registrarAuditoria(tx, {
+        empresaId,
+        usuarioId,
+        actorTipo: "persona",
+        accion: "crear_sku",
+        entidad: "sku",
+        detalle: `Creó el SKU ${nuevo.codigo} (${nuevo.nombre}) desde el Registro de compras.`,
+      });
+    } else {
+      skuId = (datos.producto as { skuId: string }).skuId;
+      await validarSkusSimplesTx(tx, empresaId, [skuId]);
+    }
+    return insertarOrdenTx(
+      tx,
+      empresaId,
+      usuarioId,
+      { terceroId: datos.terceroId, bodegaDestinoId: datos.bodegaDestinoId, nota: datos.nota, compra },
+      [{ skuId, cantidad: datos.cantidad, costoUnitario }]
     );
+  });
+}
+
+// Corrige los datos de la compra en la plataforma (fecha, forma de pago,
+// plataforma, orden, link, entrega estimada). Cantidades y costos no se
+// tocan acá: la recepción y el kardex dependen de ellos.
+export async function actualizarDatosCompra(empresaId: string, usuarioId: string, ordenId: string, entrada: Partial<DatosCompra>): Promise<void> {
+  if (!esUuid(ordenId)) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
+  const compra = validarDatosCompra(entrada);
+  await dbComoEmpresa(empresaId, async (tx) => {
+    const filas = await tx
+      .update(ordenesCompra)
+      .set({ ...compra, actualizadoTs: new Date() })
+      .where(and(eq(ordenesCompra.empresaId, empresaId), eq(ordenesCompra.id, ordenId)))
+      .returning({ numero: ordenesCompra.numero });
+    if (filas.length === 0) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
     await registrarAuditoria(tx, {
       empresaId,
       usuarioId,
       actorTipo: "persona",
-      accion: "inventario.orden_compra_creada",
+      accion: "inventario.orden_compra_editada",
       entidad: "ordenes_compra",
-      entidadId: orden.id,
-      detalle: `OC-${orden.numero} con ${lineas.length} SKU.`,
+      entidadId: ordenId,
+      detalle: `Actualizó los datos de compra de OC-${filas[0].numero}.`,
     });
-    return orden;
   });
+}
+
+// Corrige cantidad y valor unidad de las líneas de una OC (27-nov,
+// Registro de compras). Reglas para no romper inventario ni pagos:
+// - cantidad: solo si no ha llegado nada (OC «abierta»); lo recibido
+//   ya está en el kardex y no se reescribe.
+// - valor unidad: solo si la OC no está liquidada (ya se pagó por ese
+//   valor) ni anulada.
+export async function actualizarLineasCompra(
+  empresaId: string,
+  usuarioId: string,
+  ordenId: string,
+  lineas: { itemId: string; cantidad: number; costoUnitario: string | null }[]
+): Promise<void> {
+  if (!esUuid(ordenId)) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
+  if (lineas.length === 0) throw new CompraInvalidaError("No hay líneas para corregir.");
+  if (!lineas.every((l) => esUuid(l.itemId))) throw new CompraInvalidaError("Esa línea no es de esta orden.");
+  const validas = lineas.map((l) => {
+    validarCantidad("entrada", l.cantidad);
+    return { ...l, costoUnitario: validarMonto(l.costoUnitario, "Valor unidad") };
+  });
+
+  await dbComoEmpresa(empresaId, async (tx) => {
+    const [orden] = await tx
+      .select({ numero: ordenesCompra.numero, estado: ordenesCompra.estado, fechaPago: ordenesCompra.fechaPago })
+      .from(ordenesCompra)
+      .where(and(eq(ordenesCompra.empresaId, empresaId), eq(ordenesCompra.id, ordenId)))
+      .for("update");
+    if (!orden) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
+    if (orden.estado === "anulada") throw new CompraInvalidaError("La orden está anulada: no se corrige.");
+    const actuales = await tx
+      .select({ id: ordenCompraItems.id, cantidad: ordenCompraItems.cantidadPedida, costo: ordenCompraItems.costoUnitario })
+      .from(ordenCompraItems)
+      .where(and(eq(ordenCompraItems.empresaId, empresaId), eq(ordenCompraItems.ordenCompraId, ordenId)));
+    const porId = new Map(actuales.map((a) => [a.id, a]));
+    const cambios: string[] = [];
+    for (const l of validas) {
+      const actual = porId.get(l.itemId);
+      if (!actual) throw new CompraInvalidaError("Esa línea no es de esta orden.");
+      const cambiaCantidad = l.cantidad !== actual.cantidad;
+      // En centavos: «1000» del formulario y «1000.00» de la base son lo mismo.
+      const centavos = (m: string | null) => (m === null ? null : aCentavos(m));
+      const cambiaCosto = centavos(l.costoUnitario) !== centavos(actual.costo);
+      if (cambiaCantidad && orden.estado !== "abierta") {
+        throw new CompraInvalidaError("Ya llegó mercancía de esta orden: la cantidad no se corrige (lo recibido ya está en el kardex).");
+      }
+      if (cambiaCosto && orden.fechaPago) throw new CompraInvalidaError("La compra ya está liquidada: el valor unidad no se corrige.");
+      if (!cambiaCantidad && !cambiaCosto) continue;
+      await tx
+        .update(ordenCompraItems)
+        .set({ cantidadPedida: l.cantidad, costoUnitario: l.costoUnitario })
+        .where(and(eq(ordenCompraItems.empresaId, empresaId), eq(ordenCompraItems.id, l.itemId)));
+      cambios.push(`${cambiaCantidad ? `cantidad ${actual.cantidad}→${l.cantidad}` : ""}${cambiaCantidad && cambiaCosto ? ", " : ""}${cambiaCosto ? `valor ${actual.costo ?? "—"}→${l.costoUnitario ?? "—"}` : ""}`);
+    }
+    if (cambios.length === 0) return;
+    await tx.update(ordenesCompra).set({ actualizadoTs: new Date() }).where(and(eq(ordenesCompra.empresaId, empresaId), eq(ordenesCompra.id, ordenId)));
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "inventario.orden_compra_corregida",
+      entidad: "ordenes_compra",
+      entidadId: ordenId,
+      detalle: `Corrigió OC-${orden.numero}: ${cambios.join("; ")}.`,
+    });
+  });
+}
+
+export type FilaRegistroCompra = {
+  ordenId: string;
+  numero: number;
+  estado: string;
+  fechaCompra: string;
+  skuCodigo: string;
+  producto: string;
+  cantidad: number;
+  recibida: number;
+  valorUnidad: string | null;
+  total: string | null;
+  formaPago: string | null;
+  plataforma: string | null;
+  ordenPlataforma: string | null;
+  linkCompra: string | null;
+  liquidado: string | null;
+  fechaEntrega: string | null;
+  entregaEstimada: string | null;
+  bodega: string;
+};
+
+// Una fila por producto de cada OC (las OC viejas de varios SKU salen
+// en varias filas). Buscador sobre producto, SKU, plataforma, orden de
+// la plataforma, OC-N, forma de pago y fecha: un solo patrón ILIKE con
+// los comodines escapados, nunca texto del usuario dentro del SQL.
+export async function listarRegistroCompras(empresaId: string, buscar?: string | null): Promise<FilaRegistroCompra[]> {
+  const patron = patronBusquedaLike(buscar ?? null);
+  const fechaCompra = sql<string>`coalesce(${ordenesCompra.fechaCompra}, (${ordenesCompra.creadoTs} at time zone 'America/Bogota')::date)::text`;
+  return dbComoEmpresa(empresaId, (tx) =>
+    tx
+      .select({
+        ordenId: ordenesCompra.id,
+        numero: ordenesCompra.numero,
+        estado: ordenesCompra.estado,
+        fechaCompra,
+        skuCodigo: skus.codigo,
+        producto: skus.nombre,
+        cantidad: ordenCompraItems.cantidadPedida,
+        recibida: ordenCompraItems.cantidadRecibida,
+        valorUnidad: ordenCompraItems.costoUnitario,
+        total: sql<string | null>`(${ordenCompraItems.cantidadPedida} * ${ordenCompraItems.costoUnitario})::numeric(16,2)::text`,
+        formaPago: ordenesCompra.formaPago,
+        plataforma: ordenesCompra.plataforma,
+        ordenPlataforma: ordenesCompra.ordenPlataforma,
+        linkCompra: ordenesCompra.linkCompra,
+        liquidado: ordenesCompra.fechaPago,
+        fechaEntrega: sql<string | null>`(select (max(${recepciones.recibidoTs}) at time zone 'America/Bogota')::date::text from ${recepciones} where ${recepciones.empresaId} = ${ordenesCompra.empresaId} and ${recepciones.ordenCompraId} = ${ordenesCompra.id})`,
+        entregaEstimada: ordenesCompra.entregaEstimada,
+        bodega: bodegas.nombre,
+      })
+      .from(ordenCompraItems)
+      .innerJoin(ordenesCompra, and(eq(ordenesCompra.empresaId, ordenCompraItems.empresaId), eq(ordenesCompra.id, ordenCompraItems.ordenCompraId)))
+      .innerJoin(skus, and(eq(skus.empresaId, ordenCompraItems.empresaId), eq(skus.id, ordenCompraItems.skuId)))
+      .innerJoin(bodegas, and(eq(bodegas.empresaId, ordenesCompra.empresaId), eq(bodegas.id, ordenesCompra.bodegaDestinoId)))
+      .where(
+        and(
+          eq(ordenCompraItems.empresaId, empresaId),
+          patron === null
+            ? undefined
+            : or(
+                sql`${skus.nombre} ilike ${patron}`,
+                sql`${skus.codigo} ilike ${patron}`,
+                sql`${ordenesCompra.plataforma} ilike ${patron}`,
+                sql`${ordenesCompra.ordenPlataforma} ilike ${patron}`,
+                sql`${ordenesCompra.formaPago} ilike ${patron}`,
+                sql`('OC-' || ${ordenesCompra.numero}) ilike ${patron}`,
+                sql`${fechaCompra} ilike ${patron}`
+              )
+        )
+      )
+      .orderBy(desc(fechaCompra), desc(ordenesCompra.numero), asc(skus.codigo))
+      .limit(500)
+  );
 }
 
 async function validarSkusSimplesTx(tx: typeof db, empresaId: string, skuIds: string[]) {
@@ -125,6 +381,14 @@ export async function obtenerOrdenCompra(empresaId: string, ordenId: string) {
         bodegaDestinoId: ordenesCompra.bodegaDestinoId,
         bodega: bodegas.nombre,
         proveedor: terceros.nombre,
+        fechaCompra: ordenesCompra.fechaCompra,
+        formaPago: ordenesCompra.formaPago,
+        plataforma: ordenesCompra.plataforma,
+        ordenPlataforma: ordenesCompra.ordenPlataforma,
+        linkCompra: ordenesCompra.linkCompra,
+        entregaEstimada: ordenesCompra.entregaEstimada,
+        fechaPago: ordenesCompra.fechaPago,
+        medioPago: ordenesCompra.medioPago,
       })
       .from(ordenesCompra)
       .innerJoin(bodegas, and(eq(bodegas.empresaId, ordenesCompra.empresaId), eq(bodegas.id, ordenesCompra.bodegaDestinoId)))
@@ -184,14 +448,16 @@ export async function registrarRecepcion(
     await validarSkusSimplesTx(tx, empresaId, lineas.map((l) => l.skuId));
 
     let lineaOcPorSku = new Map<string, string>();
+    let numeroOc: number | null = null;
     if (datos.ordenCompraId) {
       const [orden] = await tx
-        .select({ id: ordenesCompra.id, estado: ordenesCompra.estado, bodegaDestinoId: ordenesCompra.bodegaDestinoId })
+        .select({ id: ordenesCompra.id, numero: ordenesCompra.numero, estado: ordenesCompra.estado, bodegaDestinoId: ordenesCompra.bodegaDestinoId })
         .from(ordenesCompra)
         .where(and(eq(ordenesCompra.empresaId, empresaId), eq(ordenesCompra.id, datos.ordenCompraId)))
         .for("update");
       if (!orden) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
       if (orden.estado === "anulada" || orden.estado === "recibida") throw new CompraInvalidaError("Esa orden de compra ya está cerrada.");
+      numeroOc = orden.numero;
       const itemsOc = await tx
         .select({ id: ordenCompraItems.id, skuId: ordenCompraItems.skuId })
         .from(ordenCompraItems)
@@ -226,7 +492,8 @@ export async function registrarRecepcion(
       origen: "recepcion",
       referenciaId: datos.recepcionId,
       actor: { tipo: "persona", usuarioId },
-      nota: datos.nota,
+      // 27-nov: el kardex dice de qué OC son las unidades («OC-12 · nota»).
+      nota: notaRecepcion(numeroOc, datos.nota),
       lineas: lineas.map((l) => ({ tipo: "entrada" as const, bodegaId: datos.bodegaId, skuId: l.skuId, cantidad: l.cantidad })),
     });
 
@@ -280,5 +547,28 @@ export async function anularOrdenCompra(empresaId: string, usuarioId: string, or
       entidad: "ordenes_compra",
       entidadId: ordenId,
     });
+  });
+}
+
+// Sugerencias de «Forma de pago» del Registro de compras: las que ya se
+// usaron en compras de la empresa (MATEO AMEX…) y, si la persona puede
+// ver Finanzas, las cuentas activas de Disponible. Se escribe libre
+// igual: las tarjetas de crédito no son cuentas de Disponible.
+export async function sugerenciasFormaPago(empresaId: string, incluirDisponible: boolean): Promise<string[]> {
+  return dbComoEmpresa(empresaId, async (tx) => {
+    const usadas = await tx
+      .selectDistinct({ nombre: ordenesCompra.formaPago })
+      .from(ordenesCompra)
+      .where(and(eq(ordenesCompra.empresaId, empresaId), sql`${ordenesCompra.formaPago} is not null`))
+      .limit(50);
+    const cuentas = incluirDisponible
+      ? await tx
+          .select({ nombre: cuentasDisponible.nombre })
+          .from(cuentasDisponible)
+          .where(and(eq(cuentasDisponible.empresaId, empresaId), eq(cuentasDisponible.activa, true)))
+          .limit(50)
+      : [];
+    const nombres = [...usadas, ...cuentas].map((f) => f.nombre).filter((n): n is string => !!n);
+    return [...new Set(nombres)].sort((a, b) => a.localeCompare(b, "es"));
   });
 }
