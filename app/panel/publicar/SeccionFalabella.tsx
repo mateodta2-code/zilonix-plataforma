@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { atributosFalabellaAction, categoriasFalabellaAction } from "./falabella-actions";
+import { atributosFalabellaAction, categoriasFalabellaAction, recomendarCategoriaFalabellaAction } from "./falabella-actions";
 import type { AtributoCategoria } from "@/lib/falabella/catalogo";
+import { preseleccionarCategorias } from "@/lib/falabella/categorias-sugeridas";
 import { construirEan } from "@/lib/falabella/publicar-reglas";
 import styles from "./publicar.module.css";
 
@@ -18,10 +20,6 @@ const YA_CUBIERTOS = new Set([
 // «Características de la categoría» de Falabella (el equivalente al bloque de
 // Mercado Libre). Título, descripción y portada van en «Título, descripción y
 // portada por cuenta»; precio, stock, SKU y fotos, en «Datos generales».
-function sinTildes(t: string) {
-  return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
 export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; sku: string; titulo: string }) {
   const [categoria, setCategoria] = useState<{ id: number; ruta: string } | null>(null);
   const [lista, setLista] = useState<{ id: number; ruta: string }[] | null>(null);
@@ -58,20 +56,22 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
 
   // Sugerencias según el título (palabras del título que aparecen en la ruta
   // de la categoría). Evita elegir a ciegas una categoría que pide campos raros.
-  const sugeridas = useMemo(() => {
-    if (!lista) return [];
-    const palabras = sinTildes(titulo).split(/[^a-z0-9]+/).filter((w) => w.length >= 4).map((w) => w.replace(/(es|s)$/, ""));
-    if (palabras.length === 0) return [];
-    return lista
-      .map((c) => {
-        const ruta = sinTildes(c.ruta);
-        return { c, puntos: palabras.filter((w) => ruta.includes(w)).length };
-      })
-      .filter((x) => x.puntos > 0)
-      .sort((a, b) => b.puntos - a.puntos || a.c.ruta.length - b.c.ruta.length)
-      .slice(0, 6)
-      .map((x) => x.c);
-  }, [lista, titulo]);
+  const sugeridas = useMemo(() => (lista ? preseleccionarCategorias(lista, titulo) : []), [lista, titulo]);
+  const [recomendadas, setRecomendadas] = useState<{ id: number; ruta: string }[] | null>(null);
+  const [conIA, setConIA] = useState(false);
+  const [recomendando, setRecomendando] = useState(false);
+
+  async function recomendar() {
+    setRecomendando(true);
+    setError(null);
+    const r = await recomendarCategoriaFalabellaAction(cuentaId, titulo);
+    setRecomendando(false);
+    if (r.ok) {
+      setRecomendadas(r.datos.categorias);
+      setConIA(r.datos.conIA);
+      if (r.datos.categorias.length === 0) setError("No encontré una categoría parecida al título. Búscala escribiendo una palabra.");
+    } else setError(r.error);
+  }
 
   async function elegir(c: { id: number; ruta: string }) {
     setCategoria(c);
@@ -82,13 +82,23 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
     setError(null);
     const r = await atributosFalabellaAction(cuentaId, c.id);
     setCargandoAtributos(false);
-    if (r.ok) setAtributos(r.datos);
-    else setError(r.error);
+    if (r.ok) {
+      setAtributos(r.datos);
+      // País de origen: siempre China (regla de Mateo). Si es lista, se elige la opción que diga China.
+      const origen: Record<string, string> = {};
+      for (const a of r.datos) {
+        if (!/pais.*origen|origen|origin/i.test(`${a.nombre} ${a.etiqueta}`) || /ciudad|city/i.test(a.nombre)) continue;
+        const opcion = a.opciones.find((o) => /china/i.test(o));
+        if (a.opciones.length === 0) origen[a.nombre] = "China";
+        else if (opcion) origen[a.nombre] = opcion;
+      }
+      setValores(origen);
+    } else setError(r.error);
   }
 
   const modeloAtributo = atributos?.find((a) => a.nombre === "Modelo");
   // Obligatorios de ESTA categoría (los que Falabella pide y no cubrimos ya).
-  const obligatorios = (atributos ?? []).filter((a) => a.obligatorio && a.nombre !== "Modelo" && !YA_CUBIERTOS.has(a.nombre));
+  const obligatorios = (atributos ?? []).filter((a) => a.obligatorio && a.nombre !== "Modelo" && a.nombre !== "Variation" && !YA_CUBIERTOS.has(a.nombre));
   const ean = construirEan(sku);
 
   function campo(a: { nombre: string; etiqueta: string; opciones: string[]; obligatorio: boolean }) {
@@ -97,7 +107,7 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
     return (
       <Campo key={a.nombre} etiqueta={`${a.etiqueta || a.nombre}${a.obligatorio ? " *" : ""}`}>
         {a.opciones.length > 0 ? (
-          <select className="zx-control" value={v} onChange={(e) => poner(e.target.value)}>
+          <select className="zx-control" required={a.obligatorio} value={v} onChange={(e) => poner(e.target.value)}>
             <option value="">Elegir…</option>
             {a.opciones.map((o) => (
               <option key={o} value={o}>
@@ -106,7 +116,7 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
             ))}
           </select>
         ) : (
-          <input className="zx-control" value={v} onChange={(e) => poner(e.target.value)} />
+          <input className="zx-control" required={a.obligatorio} placeholder={a.nombre === "Variation" ? "Único" : undefined} value={v} onChange={(e) => poner(e.target.value)} />
         )}
       </Campo>
     );
@@ -146,10 +156,20 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
             disabled={cargando}
             onChange={(e) => setBusqueda(e.target.value)}
           />
-          {busqueda.trim().length < 2 && sugeridas.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <Boton type="button" variante="secundario" chico onClick={recomendar} disabled={recomendando || cargando || !titulo.trim()}>
+              {recomendando ? "Buscando…" : "Recomendar categoría según el título"}
+            </Boton>
+          </div>
+          {recomendadas && recomendadas.length > 0 && (
+            <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
+              {conIA ? "Recomendadas por la IA (de la más a la menos adecuada):" : "Parecidas al título (sin IA conectada para Publicaciones):"}
+            </p>
+          )}
+          {busqueda.trim().length < 2 && !recomendadas && sugeridas.length > 0 && (
             <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>Sugeridas según el título:</p>
           )}
-          {(busqueda.trim().length < 2 ? sugeridas : coincidencias).map((c) => (
+          {(busqueda.trim().length >= 2 ? coincidencias : recomendadas ?? sugeridas).map((c) => (
             <button key={c.id} type="button" className={styles.recuadroMarca} style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13, marginTop: 6 }} onClick={() => void elegir(c)}>
               {c.ruta}
             </button>
@@ -166,8 +186,9 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
           {cargandoAtributos && <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Cargando atributos…</p>}
           {atributos && (
             <>
-              {/* Modelo siempre se pide: lleva la marca real. Si la categoría lo define como lista, solo acepta esas opciones. */}
-              {campo({ nombre: "Modelo", etiqueta: "Modelo (marca real del producto)", opciones: modeloAtributo?.opciones ?? [], obligatorio: true })}
+              {/* Modelo (marca real) solo existe en algunas categorías: si la categoría no lo trae, Falabella lo rechaza. Si es lista, solo acepta esas opciones. */}
+              {modeloAtributo && campo({ nombre: "Modelo", etiqueta: "Modelo (marca real del producto)", opciones: modeloAtributo.opciones, obligatorio: true })}
+              {campo({ nombre: "Variation", etiqueta: "Variación (déjala en «Único» si el producto no tiene variantes)", opciones: [], obligatorio: false })}
               {obligatorios.map((a) => campo(a))}
               {obligatorios.length === 0 && <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>Esta categoría no pide más atributos obligatorios.</p>}
             </>

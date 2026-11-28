@@ -1,0 +1,1 @@
+- Falabella: botón «Recomendar categoría según el título» (IA conectada para Publicaciones, o por palabras si no hay).
