@@ -1,0 +1,1 @@
+- Finanzas → Ventas y utilidad, pestaña Falabella: sin páginas de 50 órdenes; todas las órdenes del rango en una caja con barra para bajar y encabezado fijo, con los números de ancho fijo como la pestaña Mercado Libre.
