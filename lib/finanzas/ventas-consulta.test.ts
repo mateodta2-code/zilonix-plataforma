@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { ventasCorrecciones } from "@/db/schema";
+import { devolucionesInventario, ventasCorrecciones } from "@/db/schema";
 import { crearCuentaMlDePrueba, crearVentaDePrueba } from "@/db/test-utils/venta";
 import { guardarCostoSku } from "@/lib/costos-sku";
 import { limitesDiaBogota } from "@/lib/filtros-listado";
@@ -96,14 +96,17 @@ describe("ventas y utilidad, solo lectura (issue #131 Parte A)", () => {
     expect(pedidosDelDetalle(del11.detalle)).not.toContain(guardada.pedidoId);
   });
 
-  it("(d) una venta cancelled y una cancelada por reembolso total no aparecen ni suman", async () => {
+  it("(d) una venta cancelled y una cancelada por reembolso total no suman: van a «Canceladas y devoluciones»", async () => {
     const dia = new Date("2026-09-12T15:00:00Z");
     const buena = await guardarVentaFinanzas(empresaId, cuentaMlId, venta(dia));
-    await guardarVentaFinanzas(empresaId, cuentaMlId, venta(dia, { estado: "cancelled", valorVenta: "9999999.00" }));
-    await guardarVentaFinanzas(empresaId, cuentaMlId, venta(dia, { valorVenta: "8888888.00", reembolsos: "8888888.00", cancelada: true }));
+    const cancelada = await guardarVentaFinanzas(empresaId, cuentaMlId, venta(dia, { estado: "cancelled", valorVenta: "9999999.00" }));
+    const reembolsada = await guardarVentaFinanzas(empresaId, cuentaMlId, venta(dia, { valorVenta: "8888888.00", reembolsos: "8888888.00", cancelada: true }));
 
-    const { detalle } = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: cuentaMlId, ...rangoDe("2026-09-12") });
+    const { detalle, fueraDeUtilidad } = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: cuentaMlId, ...rangoDe("2026-09-12") });
     expect(pedidosDelDetalle(detalle)).toEqual([buena.pedidoId]);
+    expect(fueraDeUtilidad.map((v) => `${v.pedidoId}|${v.motivo}`).sort()).toEqual(
+      [`${cancelada.pedidoId}|cancelada`, `${reembolsada.pedidoId}|reembolso_total`].sort()
+    );
     expect(detalle.total.recaudo).toBe("50000.00");
     // Recaudo − comisión − flete − costo − packing − envío agencia.
     expect(detalle.total.utilidad).toBe("17000.00");
@@ -133,12 +136,34 @@ describe("ventas y utilidad, solo lectura (issue #131 Parte A)", () => {
     expect(await tieneVentaFinanzas(empresaId, guardada.pedidoId)).toBe(true);
   });
 
-  it("(f) con reembolso parcial el recaudo no baja y la venta lleva la marca de revisar", async () => {
+  it("(f) con reembolso parcial la venta entera sale de la utilidad (decisión de Sharel, 28-nov)", async () => {
     const guardada = await guardarVentaFinanzas(empresaId, cuentaMlId, venta(new Date("2026-09-14T15:00:00Z"), { reembolsos: "10000.00" }));
     const resultado = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: cuentaMlId, ...rangoDe("2026-09-14") });
-    expect(resultado.detalle.total.recaudo).toBe("50000.00");
-    expect(resultado.conDevolucion).toEqual([guardada.pedidoId]);
+    expect(pedidosDelDetalle(resultado.detalle)).not.toContain(guardada.pedidoId);
+    expect(resultado.fueraDeUtilidad).toMatchObject([{ pedidoId: guardada.pedidoId, motivo: "reembolso_parcial", valorVenta: "50000.00", reembolsos: "10000.00" }]);
+    // El detalle de la venta sigue marcando la devolución.
     expect((await obtenerDetalleVentaUtilidad(empresaId, usuarioId, guardada.pedidoId))?.conDevolucion).toBe(true);
+  });
+
+  it("(f2) con reclamo de devolución en Productos → Devoluciones sale de la utilidad; anulado, vuelve", async () => {
+    const guardada = await guardarVentaFinanzas(empresaId, cuentaMlId, venta(new Date("2026-09-16T15:00:00Z")));
+    const antes = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: cuentaMlId, ...rangoDe("2026-09-16") });
+    const pedidoIdExterno = antes.pedidoIdExterno[guardada.pedidoId];
+    const [reclamo] = await dbComoEmpresa(empresaId, (tx) =>
+      tx
+        .insert(devolucionesInventario)
+        .values({ empresaId, fecha: "2026-09-18", cuentaMlId, pedidoIdExterno, producto: "Producto pantalla", cantidad: 1 })
+        .returning({ id: devolucionesInventario.id })
+    );
+
+    const conReclamo = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: cuentaMlId, ...rangoDe("2026-09-16") });
+    expect(pedidosDelDetalle(conReclamo.detalle)).not.toContain(guardada.pedidoId);
+    expect(conReclamo.fueraDeUtilidad.map((v) => `${v.pedidoId}|${v.motivo}`)).toEqual([`${guardada.pedidoId}|reclamo_devolucion`]);
+
+    await dbComoEmpresa(empresaId, (tx) => tx.update(devolucionesInventario).set({ estado: "anulada" }).where(eq(devolucionesInventario.id, reclamo.id)));
+    const anulado = await listarVentasUtilidad(empresaId, usuarioId, { cuentaId: cuentaMlId, ...rangoDe("2026-09-16") });
+    expect(pedidosDelDetalle(anulado.detalle)).toContain(guardada.pedidoId);
+    expect(anulado.fueraDeUtilidad).toEqual([]);
   });
 
   it("filtro con/sin costo, ventas que el motor rechaza aparte y rango validado", async () => {

@@ -45,14 +45,14 @@ describe("valorizarStock y totalizarInventario", () => {
       ],
       maestra
     );
+    // La bodega «De un tercero» no suma: ese inventario no es de la empresa.
     expect(lineas.map((l) => [l.codigo, l.ubicacion, l.unidades, l.valor])).toEqual([
       ["AGUJA", "bodegas", 4, "4002.00"],
-      ["TAZA", "bodegas", 1, "5000.00"],
       ["TAZA", "full", 2, "10000.00"],
     ]);
     expect(totalizarInventario(lineas)).toEqual({
-      total: "19002.00",
-      porUbicacion: { bodegas: "9002.00", full: "10000.00", falabella: null },
+      total: "14002.00",
+      porUbicacion: { bodegas: "4002.00", full: "10000.00", falabella: null },
       skusSinCosto: 0,
       unidadesSinCosto: 0,
       saldosNegativos: 0,
