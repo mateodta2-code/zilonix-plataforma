@@ -1,0 +1,7 @@
+- **2026-11-28** — Publicar en Falabella, fases 1 y 2 (capa de servidor, sin UI todavía).
+  - `lib/falabella/cliente.ts`: ahora soporta POST con cuerpo XML (`cuerpoXml`) y `llamarFalabellaCompleto` (devuelve `Head.RequestId`, el FeedID). Los errores de Falabella incluyen el detalle por campo/SKU.
+  - `lib/falabella/catalogo.ts` (fase 1, solo lectura): marcas, árbol de categorías (hojas) y atributos por categoría. Lectores defensivos: el formato exacto de las respuestas JSON NO está confirmado contra una cuenta real.
+  - `lib/falabella/publicar-reglas.ts`: reglas de Mateo como funciones puras (marca GENERICO + Modelo, IVA 19%, 1 kg, 25×15×25, EAN 9015785935+4 dígitos del SKU, precio normal = oferta + 25.000, oferta 30 días, título ≤60, ≤8 imágenes sin repetidas, sin suplementos ni x2/x3) y generación del XML de ProductCreate/Image.
+  - `lib/falabella/publicar.ts`: ProductCreate → FeedID → FeedStatus → Image, sin base de datos (la UI guarda el FeedID).
+  - `app/panel/publicar/falabella-actions.ts`: Server Actions con permiso `inventario`. El borrador se recalcula en el servidor antes de crear.
+  - **Pendiente**: UI en Publicar (cuentas destino con Falabella), stock en `Bodega_envio_01` (UpdateStock), confirmar con cuenta real los nombres de `GetBrands/GetCategoryTree/GetCategoryAttributes`, `ConditionType` ("Nuevo" vs "New") y el atributo `Modelo` por categoría. Sin cambios en `db/schema.ts`.
