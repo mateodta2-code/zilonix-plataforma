@@ -18,12 +18,14 @@ import { SkuCopiable } from "@/components/marco/SkuCopiable";
 
 const ETIQUETA_UBICACION: Record<Ubicacion, string> = Object.fromEntries(UBICACIONES.map((u) => [u.valor, u.etiqueta])) as Record<Ubicacion, string>;
 
-// Issue #422 — inventario valorizado: cuánta plata hay en mercancía.
-// Solo lee: exige finanzas.consultar. Bodegas (propias y 3PL) y Full
-// salen de stock_bodega; Falabella no tiene stock en la plataforma
-// todavía. Lo pendiente de las OC abiertas o parciales va aparte como
-// "Mercancía en camino" (no suma al total en inventario: todavía no
-// llegó). El cálculo vive en lib/finanzas/inventario-valorizado.ts.
+// Issue #422 — inversión en inventario: cuánta plata hay en mercancía
+// PROPIA. Se llamaba «Inventario valorizado»/«Inventario»; se renombró
+// para no confundirla con Productos → Inventario (pedido de Sharel,
+// 2026-11-28). Solo lee: exige finanzas.consultar. Bodegas propias y
+// Full salen de stock_bodega; las bodegas «De un tercero» no suman.
+// Falabella no tiene stock en la plataforma todavía. Lo pendiente de
+// las OC abiertas o parciales va aparte como "Mercancía en camino" (no
+// suma al total invertido: todavía no llegó). El cálculo vive en lib/finanzas/inventario-valorizado.ts.
 export default async function InventarioValorizadoPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const { usuario, activa: empresa, rolNombre } = await obtenerContextoPanel();
   // Doble candado: la página (lo exige scripts/verificar-permisos.test.ts)
@@ -67,21 +69,21 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
   return (
     <>
       <EncabezadoPagina
-        titulo="Inventario valorizado"
-        descripcion="Cuánta plata tiene la empresa en mercancía: unidades (disponibles + reservadas) × costo de la Tabla maestra de SKU."
+        titulo="Inversión en inventario"
+        descripcion="Cuánta plata tiene la empresa en mercancía propia (bodegas propias y Full): unidades (disponibles + reservadas) × costo de la Tabla maestra de SKU. Las bodegas «De un tercero» no suman."
       />
 
       <section className={styles.tablero}>
         <div className={styles.gridKpi}>
           <TarjetaKpi
-            titulo="Total en inventario"
+            titulo="Total invertido"
             valor={dinero(totales.total)}
             detalle={[
-              "Bodegas propias, 3PL y Full. Sin la mercancía en camino.",
+              "Bodegas propias y Full. Sin la mercancía en camino ni el inventario de terceros.",
               ...(totales.skusSinCosto > 0 ? ["No incluye los SKU sin costo."] : []),
             ]}
           />
-          <TarjetaKpi titulo="Bodegas propias y 3PL" valor={dinero(totales.porUbicacion.bodegas)} />
+          <TarjetaKpi titulo="Bodegas propias" valor={dinero(totales.porUbicacion.bodegas)} />
           <TarjetaKpi titulo="Full de Mercado Libre" valor={dinero(totales.porUbicacion.full)} detalle={detalleFull} />
           <TarjetaKpi
             titulo="Fulfillment Falabella"
@@ -204,7 +206,7 @@ export default async function InventarioValorizadoPage({ searchParams }: { searc
       <section className={styles.tablero}>
         <h2 className={styles.tituloSeccion}>Mercancía en camino</h2>
         <p className={styles.ayuda}>
-          Lo pedido y aún no recibido de las órdenes de compra abiertas o parciales. No suma al total en inventario hasta que se recibe.
+          Lo pedido y aún no recibido de las órdenes de compra abiertas o parciales. No suma al total invertido hasta que se recibe.
         </p>
         <div className={styles.gridKpi}>
           <TarjetaKpi

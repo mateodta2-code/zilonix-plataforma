@@ -1,0 +1,16 @@
+- **2026-11-28** — Finanzas: menú lateral más corto (pedido de Sharel).
+
+  - **Sin «Resumen»**: sus cifras (ventas, recaudo, utilidad del mes) ya salen en Inicio. `/panel/finanzas` queda solo como redirect a Ventas y utilidad, para no romper links viejos ni los «Volver a Finanzas» de cada pantalla; el ítem Finanzas del menú contraído va directo a Ventas y utilidad. La ruta pasa de `RUTAS_PROTEGIDAS` a `RUTAS_EXENTAS` (no lee ni escribe nada).
+  - **Conciliación Falabella dentro de Por cobrar**: sin ítem propio en el menú. Por cobrar muestra el botón «Conciliación Falabella» solo si la empresa tiene (o tuvo) una cuenta de Falabella o cortes de Falabella por cobrar. Estando en la conciliación, el menú marca «Por cobrar», y su «Volver» lleva a Por cobrar.
+  - **Proveedores dentro de Configuración**: sin ítem propio en el menú. Configuración de Finanzas trae una tarjeta «Proveedores y transportadores» con el link; el menú marca «Configuración» y el «Volver» de Proveedores lleva a Configuración.
+  - `SubitemNav` acepta `otrasRutas` (pantallas sin ítem propio que dejan marcada su sección); `ItemNavLink` las tiene en cuenta.
+  - Ventas y utilidad ya no tiene «Volver a Finanzas» (volvería a sí misma). La guía (`lib/guia/contenido.ts`) dice dónde quedaron Proveedores y Falabella.
+
+  - **«Inventario» ahora es «Inversión en inventario»** (menú y título), para no confundirlo con Productos → Inventario. **Solo suma mercancía propia**: bodegas «Propia» y Full de Mercado Libre. Las bodegas «De un tercero» ya no suman al total ni salen en la tabla (antes se contaban junto con las propias como «3PL»). El stock en operadores 3PL vive en `stock_bodega_3pl` y esta pantalla nunca lo leyó. Tarjetas: «Total invertido» y «Bodegas propias».
+
+  - **Ventas y utilidad: pestaña «Canceladas y devoluciones»** (Mercado Libre). Antes las canceladas (cancelled/invalid o reembolso total) desaparecían de la consulta sin dejar registro, y las de reembolso parcial seguían sumando con la marca «con devolución · revisar». Ahora `listarVentasUtilidad` las lee todas y separa en `fueraDeUtilidad` las que no suman, con su motivo (`lib/finanzas/fuera-de-utilidad.ts`): cancelada, reembolso total, reembolso parcial (la venta entera sale, decisión de Sharel) y reclamo de devolución no anulado en Productos → Devoluciones (`devoluciones_inventario`, por cuenta + número de orden; sale desde el reclamo aunque ML todavía no reembolse, decisión de Sharel). La pestaña (`?vista=canceladas`, mismos filtros) lista fecha, orden, cuenta, producto, motivo y los montos de la última sincronización (valor, reembolsado, comisión, flete), con totales. Como Inicio usa la misma lectura, su utilidad también deja de contar esas ventas. Pedidos no muestra la pestaña. Falabella no cambia.
+  - Pendiente: la «pérdida» de cada cancelación/devolución (qué comisión y flete cobra o devuelve ML) no se calcula todavía: falta confirmarlo con órdenes reales.
+
+  Sin migraciones. Pruebas: `components/finanzas/secciones.test.ts` (+3), `lib/finanzas/inventario-valorizado.test.ts` (la bodega «De un tercero» ya no suma), `lib/finanzas/fuera-de-utilidad.test.ts` (nuevo), `lib/finanzas/ventas-consulta.test.ts` ((d), (f) y (f2) nuevo; corren en CI con Postgres), `scripts/verificar-permisos.test.ts` y `lib/guia` en verde; `tsc` en verde.
+
+  Refs #422

@@ -26,10 +26,31 @@ describe("SECCIONES_FINANZAS", () => {
     }
   });
 
-  it("incluye Resumen, Ventas y utilidad, Por cobrar, Inventario y Conciliación Falabella", () => {
+  it("incluye Ventas y utilidad, Por cobrar, Inversión en inventario y Configuración", () => {
     const etiquetas = SECCIONES_FINANZAS.map((s) => s.etiqueta);
-    for (const e of ["Resumen", "Ventas y utilidad", "Por cobrar", "Inventario", "Conciliación Falabella"]) {
+    for (const e of ["Ventas y utilidad", "Por cobrar", "Inversión en inventario", "Configuración"]) {
       expect(etiquetas).toContain(e);
+    }
+  });
+
+  // Pedido de Sharel (2026-11-28): Resumen fuera (sus cifras están en
+  // Inicio), Falabella dentro de Por cobrar y Proveedores dentro de
+  // Configuración — sin ítem propio, pero el menú las marca.
+  it("Resumen, Conciliación Falabella y Proveedores no tienen ítem propio", () => {
+    const etiquetas = SECCIONES_FINANZAS.map((s) => s.etiqueta);
+    for (const e of ["Resumen", "Conciliación Falabella", "Proveedores"]) expect(etiquetas).not.toContain(e);
+    expect(SECCIONES_FINANZAS.some((s) => s.href === "/panel/finanzas")).toBe(false);
+  });
+
+  it("Falabella cuelga de Por cobrar y Proveedores de Configuración", () => {
+    const de = (etiqueta: string) => SECCIONES_FINANZAS.find((s) => s.etiqueta === etiqueta)?.otrasRutas;
+    expect(de("Por cobrar")).toEqual(["/panel/finanzas/falabella"]);
+    expect(de("Configuración")).toEqual(["/panel/finanzas/proveedores"]);
+  });
+
+  it("cada ruta colgada es una página real de /panel/finanzas", () => {
+    for (const s of SECCIONES_FINANZAS) {
+      for (const ruta of s.otrasRutas ?? []) expect(existsSync(archivoPagina(ruta)), ruta).toBe(true);
     }
   });
 });
@@ -46,6 +67,6 @@ describe("seccionesFinanzas", () => {
   });
 
   it("no expone el campo interno de permiso al menú", () => {
-    for (const s of seccionesFinanzas(PLANTILLAS.Gerente)) expect(Object.keys(s).sort()).toEqual(["etiqueta", "href"]);
+    for (const s of seccionesFinanzas(PLANTILLAS.Gerente)) expect(Object.keys(s)).not.toContain("accion");
   });
 });
