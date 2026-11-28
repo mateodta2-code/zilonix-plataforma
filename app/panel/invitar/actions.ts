@@ -14,7 +14,9 @@ export async function crearInvitacionAction(formData: FormData) {
 
   const empresaId = cookies().get("empresa_actual")?.value;
   const propias = await listarEmpresasDeUsuario(usuario.id);
-  const empresa = propias.find((e) => e.id === empresaId);
+  // Mismo criterio que page.tsx: si la cookie falta o quedó vieja, se usa
+  // la primera empresa (si no, la pantalla se ve bien y el envío falla).
+  const empresa = propias.find((e) => e.id === empresaId) ?? propias[0];
   if (!empresa) throw new Error("No se encontró tu empresa activa.");
 
   // Tarea 1.8 — invitar es "crear" en "personas". Reemplaza el
