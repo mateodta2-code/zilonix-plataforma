@@ -731,8 +731,14 @@
   color: var(--exito-texto);
 }
 
+/* Sin depender de --semaforo-naranja (definido solo en .tablaCompacta):
+   la pestaña de Falabella también usa el semáforo. */
 .margen_naranja {
-  color: var(--semaforo-naranja);
+  color: var(--kpi-advertencia-texto);
+}
+
+:global(:root[data-tema="claro"]) .margen_naranja {
+  color: color-mix(in srgb, var(--kpi-advertencia-texto) 62%, var(--texto));
 }
 
 .margen_rojo {
