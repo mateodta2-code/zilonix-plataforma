@@ -49,7 +49,7 @@ async function transicion(
   empresaId: string,
   id: string,
   desde: FilaPublicacionFalabella["estado"],
-  cambios: Partial<Pick<FilaPublicacionFalabella, "estado" | "feedProductoId" | "feedImagenesId" | "errores">>
+  cambios: Partial<Pick<FilaPublicacionFalabella, "estado" | "feedProductoId" | "feedImagenesId" | "errores" | "borrador">>
 ): Promise<boolean> {
   const filas = await dbComoEmpresa(empresaId, (tx) =>
     tx
@@ -117,4 +117,16 @@ export async function descartar(empresaId: string, id: string): Promise<void> {
   await dbComoEmpresa(empresaId, (tx) =>
     tx.delete(publicacionesFalabella).where(and(eq(publicacionesFalabella.id, id), eq(publicacionesFalabella.empresaId, empresaId)))
   );
+}
+
+// Corregir un rechazo: suma los atributos que Falabella pidió al borrador y lo
+// devuelve a «borrador» para que se apruebe de nuevo (nunca se reenvía solo).
+// Solo desde «rechazado»; el producto no existe en Falabella (el feed falló).
+export async function corregirRechazado(empresaId: string, id: string, atributos: Record<string, string>): Promise<void> {
+  const fila = await obtener(empresaId, id);
+  if (!fila) throw new Error("No se encontró esa publicación.");
+  const borrador = { ...fila.borrador, atributos: { ...fila.borrador.atributos, ...atributos } };
+  if (!(await transicion(empresaId, id, "rechazado", { estado: "borrador", borrador, errores: [] }))) {
+    throw new Error("Esta publicación ya no está rechazada.");
+  }
 }

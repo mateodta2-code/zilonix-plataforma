@@ -14,3 +14,10 @@ describe("traducirErrorFalabella", () => {
     expect(traducirErrorFalabella("Algo raro")).toBe("Algo raro");
   });
 });
+
+import { camposAcorregir } from "./errores";
+describe("camposAcorregir", () => {
+  it("saca los campos de los rechazos", () => {
+    expect(camposAcorregir(["Field 'Modelo' with value 'x' does not appear to be a valid option.", "Field 'Variation' cannot be empty", "Field 'Variation' cannot be empty", "otro"])).toEqual(["Modelo", "Variation"]);
+  });
+});

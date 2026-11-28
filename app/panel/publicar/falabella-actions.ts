@@ -9,7 +9,7 @@ import { listarCuentasConectadas, obtenerCredenciales } from "@/lib/falabella/cu
 import { aplanarHojas, obtenerArbolCategorias, obtenerAtributosCategoria, type AtributoCategoria } from "@/lib/falabella/catalogo";
 import { construirBorrador, type BorradorFalabella, type EntradaBorradorFalabella } from "@/lib/falabella/publicar-reglas";
 import { BorradorConProblemasError } from "@/lib/falabella/publicar";
-import { aprobarYCrear, avanzar, descartar } from "@/lib/falabella/publicaciones";
+import { aprobarYCrear, avanzar, corregirRechazado, descartar } from "@/lib/falabella/publicaciones";
 import { FalabellaApiError, FalabellaNoDisponibleError } from "@/lib/falabella/cliente";
 
 // Fases 1 y 2 de "Publicar en Falabella". Todo pasa por aquí (servidor): la
@@ -117,6 +117,22 @@ export async function descartarFalabellaAction(id: string): Promise<Resultado<nu
   return envolver(async () => {
     const empresaId = await empresaConPermiso("modificar", id);
     await descartar(empresaId, id);
+    return null;
+  });
+}
+
+// Llena los campos que Falabella pidió en un rechazo y devuelve la
+// publicación a borrador (se vuelve a aprobar a mano).
+export async function corregirFalabellaAction(id: string, atributos: Record<string, string>): Promise<Resultado<null>> {
+  return envolver(async () => {
+    const empresaId = await empresaConPermiso("modificar", id);
+    const limpios: Record<string, string> = {};
+    for (const [nombre, valor] of Object.entries(atributos)) {
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,60}$/.test(nombre) || typeof valor !== "string") continue;
+      if (valor.trim()) limpios[nombre] = valor.trim().slice(0, 500);
+    }
+    if (Object.keys(limpios).length === 0) throw new Error("Llena al menos un campo.");
+    await corregirRechazado(empresaId, id, limpios);
     return null;
   });
 }

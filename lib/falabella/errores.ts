@@ -33,3 +33,14 @@ export function traducirErrorFalabella(mensaje: string): string {
   }
   return limpio;
 }
+
+// Campos que Falabella dice que faltan o que tienen un valor inválido: se
+// ofrecen para llenar de nuevo en el historial.
+export function camposAcorregir(errores: string[]): string[] {
+  const nombres = new Set<string>();
+  for (const e of errores) {
+    const m = limpiar(e).match(/^Field '([^']+)'/i);
+    if (m && /^[A-Za-z][A-Za-z0-9_]{0,60}$/.test(m[1])) nombres.add(m[1]);
+  }
+  return [...nombres];
+}
