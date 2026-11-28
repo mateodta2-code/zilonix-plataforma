@@ -298,3 +298,30 @@
     margin-left: 0;
   }
 }
+
+/* Issue #280 — miniatura de la fila de inventario (foto de la última
+   venta del SKU) y su lugar vacío; mismo radio y borde de zona oscura
+   que el resto del archivo. */
+.miniatura {
+  display: block;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border: 1px solid var(--borde-zona-oscura);
+  border-radius: var(--radio-boton);
+}
+
+.miniaturaVacia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.accionesFila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
