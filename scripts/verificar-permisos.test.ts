@@ -125,6 +125,7 @@ const RUTAS_PROTEGIDAS = new Set([
   "app/panel/inventario/devoluciones/page.tsx",
   "app/panel/inventario/full/page.tsx",
   "app/panel/inventario/proyeccion/page.tsx",
+  "app/panel/inventario/proyeccion/actions.ts",
   // «Descargar CSV» de inventario y kardex: mismo inventario.consultar
   // que ver las pantallas (401 sin sesión, 403 sin permiso).
   "app/api/inventario/exportar/route.ts",

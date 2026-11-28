@@ -65,6 +65,10 @@ GRANT UPDATE (anulada_ts) ON ventas_correcciones TO app_user;
 GRANT SELECT, INSERT, UPDATE ON bodegas, stock_bodega, ordenes_compra, orden_compra_items,
   configuracion_inventario, sync_stock_ml, alertas_ultima_unidad TO app_user;
 GRANT SELECT, INSERT ON kardex_movimientos, recepciones, recepcion_items TO app_user;
+-- Proyección de inventarios: reglas y días de entrega editables por la
+-- empresa. Se editan (UPDATE) pero no se borran: sin fila vale el
+-- valor por defecto.
+GRANT SELECT, INSERT, UPDATE ON proyeccion_configuracion, proyeccion_sku TO app_user;
 REVOKE UPDATE, DELETE ON kardex_movimientos, recepciones, recepcion_items FROM app_user;
 -- Issue #125 (Z-FIN-03) — auditoria queda de solo inserción para
 -- app_user: puede dejar el rastro y leer el de su empresa, no
@@ -298,6 +302,10 @@ ALTER TABLE recepcion_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recepcion_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE configuracion_inventario ENABLE ROW LEVEL SECURITY;
 ALTER TABLE configuracion_inventario FORCE ROW LEVEL SECURITY;
+ALTER TABLE proyeccion_configuracion ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proyeccion_configuracion FORCE ROW LEVEL SECURITY;
+ALTER TABLE proyeccion_sku ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proyeccion_sku FORCE ROW LEVEL SECURITY;
 ALTER TABLE sync_stock_ml ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sync_stock_ml FORCE ROW LEVEL SECURITY;
 ALTER TABLE alertas_ultima_unidad ENABLE ROW LEVEL SECURITY;
@@ -571,6 +579,12 @@ CREATE POLICY aislamiento_recepcion_items ON recepcion_items
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_configuracion_inventario ON configuracion_inventario;
 CREATE POLICY aislamiento_configuracion_inventario ON configuracion_inventario
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_proyeccion_configuracion ON proyeccion_configuracion;
+CREATE POLICY aislamiento_proyeccion_configuracion ON proyeccion_configuracion
+  USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
+DROP POLICY IF EXISTS aislamiento_proyeccion_sku ON proyeccion_sku;
+CREATE POLICY aislamiento_proyeccion_sku ON proyeccion_sku
   USING (empresa_id = current_setting('app.empresa_actual', true)::uuid);
 DROP POLICY IF EXISTS aislamiento_sync_stock_ml ON sync_stock_ml;
 CREATE POLICY aislamiento_sync_stock_ml ON sync_stock_ml
