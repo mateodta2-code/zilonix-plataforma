@@ -20,10 +20,16 @@ function esRutaActiva(pathname: string | null, href: string): boolean {
 // La sección activa es la de ruta más larga que coincide: en
 // /panel/inventario/kardex coinciden "Inventario" y "Kardex", y solo
 // Kardex tiene que quedar marcada.
+// También cuentan las otrasRutas de cada sección (pantallas sin ítem
+// propio), con el largo de la ruta que de verdad coincidió.
 function hijoActivo(pathname: string | null, hijos: SubitemNav[]): string | null {
-  const coincidentes = hijos.filter((h) => esRutaActiva(pathname, h.href));
-  if (coincidentes.length === 0) return null;
-  return coincidentes.reduce((a, b) => (b.href.length > a.href.length ? b : a)).href;
+  let mejor: { href: string; largo: number } | null = null;
+  for (const h of hijos) {
+    for (const ruta of [h.href, ...(h.otrasRutas ?? [])]) {
+      if (esRutaActiva(pathname, ruta) && (!mejor || ruta.length > mejor.largo)) mejor = { href: h.href, largo: ruta.length };
+    }
+  }
+  return mejor?.href ?? null;
 }
 
 export function ItemNavLink({ item, colapsada }: { item: ItemNav; colapsada: boolean }) {

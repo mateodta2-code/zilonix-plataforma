@@ -51,7 +51,10 @@ export type ItemNav = {
   hijos?: SubitemNav[];
 };
 
-export type SubitemNav = { etiqueta: string; href: string };
+// otrasRutas: pantallas sin ítem propio en el menú que cuelgan de esta
+// sección (Conciliación Falabella dentro de Por cobrar) — estando en
+// ellas, la sección queda marcada y el módulo abierto.
+export type SubitemNav = { etiqueta: string; href: string; otrasRutas?: string[] };
 
 export type GrupoNav = {
   // Sin etiqueta = grupo principal, sin encabezado. Con etiqueta

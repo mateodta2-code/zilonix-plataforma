@@ -8,6 +8,8 @@ import { obtenerMiMembresia } from "@/lib/membresias";
 import { obtenerOCrearUsuarioActual } from "@/lib/usuarios";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { listarCuentasConectadas } from "@/lib/ml/cuentas";
+import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
+import { listarPublicaciones as listarPublicacionesFalabella } from "@/lib/falabella/publicaciones";
 import { marcarPublicacionesColgadas } from "@/lib/ml/publicar";
 import { linkHttpSeguro } from "@/lib/ml/listadoCliente";
 import { SinAcceso } from "@/components/marco/SinAcceso";
@@ -69,6 +71,20 @@ export default async function PublicarPage({
   // cierran como con_errores ANTES de leer el historial.
   await marcarPublicacionesColgadas(empresa.id).catch((error) => console.error("No se pudieron cerrar las publicaciones colgadas:", error instanceof Error ? error.message : error));
 
+  const cuentasFalabella = (await listarCuentasFalabella(empresa.id)).filter((c) => !c.desconectadaTs);
+  const nombreCuentaFalabella = new Map(cuentasFalabella.map((c) => [c.id, c.nickname]));
+  const historialFalabella = (await listarPublicacionesFalabella(empresa.id)).map((p) => ({
+    id: p.id,
+    cuenta: nombreCuentaFalabella.get(p.cuentaFalabellaId) ?? "Falabella",
+    cuentaId: p.cuentaFalabellaId,
+    sku: p.sku,
+    titulo: p.titulo,
+    estado: p.estado,
+    borrador: p.borrador,
+    errores: p.errores,
+    creadoTs: p.creadoTs.toISOString(),
+  }));
+
   const filasHistorial = await dbComoEmpresa(empresa.id, (tx) =>
     tx.select().from(productosMl).where(eq(productosMl.empresaId, empresa.id)).orderBy(desc(productosMl.creadoTs)).limit(50)
   );
@@ -122,11 +138,13 @@ export default async function PublicarPage({
   return (
     <>
       <EncabezadoPagina
-        titulo="Publicar en Mercado Libre"
+        titulo="Publicar en Mercado Libre y Falabella"
         descripcion="Elige las cuentas destino — cada una tiene su propio título, descripción y foto de portada. Precio, stock, SKU y el resto de fotos son iguales para todas. Publicación tipo Premium con garantía del vendedor de 30 días, siempre."
       />
       <PaginaPublicar
         cuentas={cuentas.map((c) => ({ id: c.id, nickname: c.nickname, siteId: c.siteId, moneda: c.moneda, idioma: c.idioma }))}
+        cuentasFalabella={cuentasFalabella.map((c) => ({ id: c.id, nickname: c.nickname, siteId: "FACO", moneda: "COP", idioma: "es" }))}
+        historialFalabella={historialFalabella}
         historial={historial}
         prefillNuevo={prefillNuevo}
         itemImportado={itemImportado}

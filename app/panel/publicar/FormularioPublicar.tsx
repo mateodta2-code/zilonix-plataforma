@@ -9,6 +9,7 @@ import { crearYPublicarProductoAction } from "./actions";
 import { ConectarCanva } from "./ConectarCanva";
 import { mensajeErrorConectarCanva } from "./canva-mensajes-error";
 import { CuentasDestino, type Cuenta } from "./CuentasDestino";
+import { SeccionFalabella } from "./SeccionFalabella";
 import { CrearConIA } from "./CrearConIA";
 import { GenerarConIA } from "./GenerarConIA";
 import { borrarBorradoresIA, CLAVES_BORRADOR_IA, useBorradorIA } from "./ia/borradorIA";
@@ -51,12 +52,21 @@ type RespuestaCaracteristicas = {
 // falta un efecto que "reseedee" el estado a mano.
 export function FormularioPublicar({
   cuentas,
+  cuentasFalabella,
+  pestana,
   inicial,
   cloudinaryConfigurado,
   canva,
   canvaCodigo,
 }: {
   cuentas: Cuenta[];
+  // Cuentas de Falabella conectadas: van en «Cuentas destino» como otro grupo,
+  // pero nunca entran a las secciones por cuenta de Mercado Libre.
+  cuentasFalabella: Cuenta[];
+  // Subpestaña activa (la elige PaginaPublicar). Las dos vistas quedan
+  // montadas siempre — solo se ocultan — para no perder lo escrito ni lo
+  // generado al cambiar de una a otra, y para que todo viaje en el mismo envío.
+  pestana: "publicar" | "imagenes";
   inicial: EstadoInicialFormulario;
   cloudinaryConfigurado: boolean;
   canva: string;
@@ -167,6 +177,7 @@ export function FormularioPublicar({
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
 
   const cuentasMarcadas = useMemo(() => cuentas.filter((c) => incluidas[c.id]), [cuentas, incluidas]);
+  const falabellaMarcadas = useMemo(() => cuentasFalabella.filter((c) => incluidas[c.id]), [cuentasFalabella, incluidas]);
   const cuentaReferencia = cuentasMarcadas[0]?.id ?? null;
   // Issue #315 — la categoría se detecta/guarda en el site_id REAL de
   // la cuenta de referencia (la primera marcada), nunca "MCO" fijo.
@@ -252,12 +263,13 @@ export function FormularioPublicar({
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     setErrorEnvio(null);
-    if (cuentasMarcadas.length === 0) {
+    if (cuentasMarcadas.length === 0 && falabellaMarcadas.length === 0) {
       e.preventDefault();
-      setErrorEnvio("Elige al menos una cuenta de Mercado Libre donde publicar.");
+      setErrorEnvio("Elige al menos una cuenta (Mercado Libre o Falabella) donde publicar.");
       return;
     }
-    if (esRellenoFalsoDimensiones(dimensiones)) {
+    // Las medidas de Mercado Libre solo se exigen si hay una cuenta de Mercado Libre marcada.
+    if (cuentasMarcadas.length > 0 && esRellenoFalsoDimensiones(dimensiones)) {
       e.preventDefault();
       setErrorEnvio(
         "Las 4 medidas del paquete están en 1 o menos — parece un relleno sin medir de verdad. Mercado Libre usa esto para calcular el envío real: completá el peso/largo/ancho/alto reales del paquete."
@@ -267,6 +279,7 @@ export function FormularioPublicar({
 
   return (
     <form id="formulario-publicar" action={crearYPublicarProductoAction} onSubmit={onSubmit}>
+      <div hidden={pestana !== "publicar"}>
       {/* --- Primer paso visible: conectar Canva (antes vivía dentro de
       GaleriaFotos.tsx, debajo de las miniaturas — se mueve arriba
       porque resuelve de dónde van a salir las fotos antes de armar el
@@ -287,7 +300,10 @@ export function FormularioPublicar({
       {/* --- Punto 3: Cuentas destino --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Cuentas destino</p>
-        <CuentasDestino grupos={[{ titulo: "Cuentas", cuentas }]} incluidas={incluidas} onCambiar={setIncluidas} />
+        <CuentasDestino
+          grupos={[{ titulo: "Mercado Libre", cuentas }, ...(cuentasFalabella.length > 0 ? [{ titulo: "Falabella", cuentas: cuentasFalabella }] : [])]} incluidas={incluidas}
+          onCambiar={setIncluidas}
+        />
       </Tarjeta>
 
       {/* --- Punto 4: Datos generales --- */}
@@ -299,7 +315,7 @@ export function FormularioPublicar({
         <Campo etiqueta="Stock (c/u)">
           <input name="stock" type="number" className="zx-control" value={stock} onChange={(e) => setStock(e.target.value)} />
         </Campo>
-        <Campo etiqueta="SKU propio (opcional)">
+        <Campo etiqueta="SKU (el mismo para Mercado Libre y Falabella; en Falabella es obligatorio)">
           <input name="sku" className="zx-control" value={sku} onChange={(e) => setSku(e.target.value)} />
         </Campo>
         <Campo etiqueta="Condición">
@@ -371,6 +387,9 @@ export function FormularioPublicar({
         <textarea name="imagenes" value={fotosDentroDelLimite(imagenes.filter(Boolean), maxFotos).join("\n")} readOnly hidden />
       </Tarjeta>
 
+      </div>
+
+      <div hidden={pestana !== "imagenes"}>
       {/* --- «Generación de imágenes para Meli» (antes «Crear con IA», 23-nov):
           imágenes de referencia (solo para la IA), información y 1. ficha
           arriba; debajo, sub pestañas Generar imágenes / Títulos /
@@ -378,6 +397,11 @@ export function FormularioPublicar({
           de abajo y las imágenes entran a la galería de arriba. --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Generación de imágenes para Meli</p>
+        {cuentasMarcadas.length === 0 && (
+          <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
+            Para usar un título, descripción o portada generados, primero elige las cuentas destino en la pestaña Publicar.
+          </p>
+        )}
         <CrearConIA
           key={reinicioIA}
           cuentas={cuentasMarcadas}
@@ -405,7 +429,9 @@ export function FormularioPublicar({
           }
         />
       </Tarjeta>
+      </div>
 
+      <div hidden={pestana !== "publicar"}>
       {/* --- Punto 5: título/descripción/portada por cuenta ELEGIDA --- */}
       <Tarjeta className={styles.seccion}>
         <div className={styles.filaAccion}>
@@ -416,7 +442,7 @@ export function FormularioPublicar({
             </Boton>
           )}
         </div>
-        {cuentasMarcadas.length === 0 ? (
+        {cuentasMarcadas.length === 0 && falabellaMarcadas.length === 0 ? (
           <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Elige al menos una cuenta destino arriba para completar su título y descripción.</p>
         ) : (
           <div style={{ marginTop: 10 }}>
@@ -450,6 +476,45 @@ export function FormularioPublicar({
                 </div>
               </div>
             ))}
+            {falabellaMarcadas.map((c) => {
+              const titulo = datosPorCuenta[c.id]?.titulo ?? "";
+              return (
+                <div key={c.id} className={`${styles.recuadroMarca} ${styles.filaCuentaDetalle}`}>
+                  <PortadaCuenta
+                    portadaUrl={datosPorCuenta[c.id]?.portadaUrl ?? ""}
+                    onChange={(url) => actualizarCuenta(c.id, "portadaUrl", url)}
+                    cloudinaryConfigurado={cloudinaryConfigurado}
+                    previaGaleria={imagenes[0] ?? null}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <Campo etiqueta={`Título en ${c.nickname} (Falabella, máximo 60, sin marcas)`}>
+                      <input name={`titulo_${c.id}`} className="zx-control" value={titulo} onChange={(e) => actualizarCuenta(c.id, "titulo", e.target.value)} />
+                    </Campo>
+                    <p style={{ fontSize: 12, color: titulo.length > 60 ? "var(--kpi-peligro-texto)" : "var(--texto-suave)", marginTop: 4 }}>
+                      {titulo.length}/60
+                      {tituloReferencia && (
+                        <>
+                          {" · "}
+                          <button type="button" className="zx-enlace" onClick={() => actualizarCuenta(c.id, "titulo", tituloReferencia.slice(0, 60))}>
+                            Usar el título de Mercado Libre
+                          </button>
+                        </>
+                      )}
+                    </p>
+                    <Campo etiqueta={`Descripción en ${c.nickname}`}>
+                      <textarea
+                        name={`descripcion_${c.id}`}
+                        rows={2}
+                        className="zx-control"
+                        value={datosPorCuenta[c.id]?.descripcion ?? ""}
+                        onChange={(e) => actualizarCuenta(c.id, "descripcion", e.target.value)}
+                      />
+                    </Campo>
+                    <input type="hidden" name={`portada_${c.id}`} value={datosPorCuenta[c.id]?.portadaUrl ?? ""} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
         {/* Todas las cuentas CONECTADAS necesitan su propio campo
@@ -463,7 +528,7 @@ export function FormularioPublicar({
 
       {/* --- Punto 6: características de la categoría (variantes adentro) --- */}
       <Tarjeta className={styles.seccion}>
-        <p className="zx-etiqueta">Características de la categoría</p>
+        <p className="zx-etiqueta">Características de la categoría — Mercado Libre</p>
         <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
           Mercado Libre exige elegir una categoría real y completar sus atributos antes de poder publicar — detectamos la categoría según el
           título de la primera cuenta elegida; si se equivoca, puedes buscarla a mano o navegar el árbol real.
@@ -511,6 +576,9 @@ export function FormularioPublicar({
         <textarea name="variantes" value={variantesTexto} readOnly hidden />
       </Tarjeta>
 
+      {/* --- Características de la categoría en Falabella (mismo lugar que las de Mercado Libre) --- */}
+      {falabellaMarcadas.length > 0 && <SeccionFalabella cuentaId={falabellaMarcadas[0].id} sku={sku} titulo={datosPorCuenta[falabellaMarcadas[0].id]?.titulo || tituloReferencia} />}
+
       {/* --- Punto 7: modo prueba + publicar --- */}
       <Tarjeta className={styles.seccion}>
         <label style={{ fontSize: 13, display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 16 }}>
@@ -518,10 +586,11 @@ export function FormularioPublicar({
           <span>Modo prueba — publicar pausado (se crea de verdad pero nunca queda visible al público, para poder probarlo y borrarlo después)</span>
         </label>
 
-        <Boton type="submit" variante="primario" disabled={cuentasMarcadas.length === 0}>
-          Publicar en {cuentasMarcadas.length} cuenta{cuentasMarcadas.length === 1 ? "" : "s"}
+        <Boton type="submit" variante="primario" disabled={cuentasMarcadas.length + falabellaMarcadas.length === 0}>
+          Publicar en {cuentasMarcadas.length + falabellaMarcadas.length} cuenta{cuentasMarcadas.length + falabellaMarcadas.length === 1 ? "" : "s"}
         </Boton>
       </Tarjeta>
+      </div>
     </form>
   );
 }

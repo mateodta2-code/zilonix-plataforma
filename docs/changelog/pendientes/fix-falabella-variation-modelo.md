@@ -1,0 +1,1 @@
+- Falabella: «Variation» va a nivel producto (antes causaba el rechazo), «Modelo» solo se envía si la categoría lo tiene, país de origen China por defecto, mejores sugerencias de categoría.

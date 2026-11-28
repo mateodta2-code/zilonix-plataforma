@@ -34,6 +34,12 @@
    El brillo real de marca en hover es esta línea de abajo (azul-metal-3
    en vez de transparent), con el mismo resplandor que ya usa la
    pestaña activa (::after, más abajo). */
+.pestana:is(button) {
+  background: none;
+  border-width: 0 0 2px;
+  font-family: inherit;
+}
+
 .pestana:hover {
   color: var(--texto-zona-oscura);
   border-bottom-color: var(--azul-metal-3);

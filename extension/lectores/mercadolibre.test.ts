@@ -1319,3 +1319,69 @@ describe("leerMonedaDePagina — multipaís (issue #520)", () => {
     expect(leerMonedaDePagina({ URL: "https://articulo.mercadolibre.com.co/x" }, ld("x"))).toBe("COP");
   });
 });
+
+import { elegirVendedor, limpiarNombreTienda, nombreDeTextoVendidoPor } from "./mercadolibre.js";
+
+describe("elegirVendedor — tienda del vendedor en la ficha (nombre + link)", () => {
+  const URL_FICHA = "https://www.mercadolibre.com.co/lampara-led/up/MCOU123";
+  it("toma el link de la tienda dentro del bloque del vendedor y limpia «Vendido por»", () => {
+    const r = elegirVendedor(
+      [
+        { href: "/tienda/otra-cosa", texto: "Ver más de esta tienda", enSeller: false },
+        { href: "https://www.mercadolibre.com.co/perfil/DIRECTOACASABOG", texto: "Vendido por DIRECTOACASABOG", enSeller: true },
+      ],
+      "",
+      URL_FICHA
+    );
+    expect(r).toEqual({ nombre: "DIRECTOACASABOG", link: "https://www.mercadolibre.com.co/perfil/DIRECTOACASABOG" });
+  });
+  it("resuelve un link relativo contra la página", () => {
+    const r = elegirVendedor([{ href: "/tienda/herramientas-sas", texto: "HERRAMIENTAS SAS", enSeller: true }], "", URL_FICHA);
+    expect(r).toEqual({ nombre: "HERRAMIENTAS SAS", link: "https://www.mercadolibre.com.co/tienda/herramientas-sas" });
+  });
+  it("sin nombre en el link usa el nickname del JSON incrustado, conservando el link", () => {
+    const html = '{"seller":{"id":99,"nickname":"TECNOHOGAR JS"}}';
+    const r = elegirVendedor([{ href: "/perfil/TECNOHOGAR+JS", texto: "Ir a la tienda", enSeller: true }], html, URL_FICHA);
+    expect(r.nombre).toBe("TECNOHOGAR JS");
+    expect(r.link).toBe("https://www.mercadolibre.com.co/perfil/TECNOHOGAR+JS");
+  });
+  it("sin ningún link usa seller_id para armar el listado del vendedor, sin nombre inventado", () => {
+    const r = elegirVendedor([], '..."seller_id":123456...', URL_FICHA);
+    expect(r).toEqual({ nombre: null, link: "https://listado.mercadolibre.com.co/_CustId_123456" });
+  });
+  it("descarta links que no son de Mercado Libre o no son https; sin datos todo es null", () => {
+    expect(elegirVendedor([{ href: "https://evil.com/tienda/x", texto: "X", enSeller: true }, { href: "http://www.mercadolibre.com.co/tienda/x", texto: "X", enSeller: true }], "", URL_FICHA)).toEqual({ nombre: null, link: null });
+    expect(elegirVendedor([], "", URL_FICHA)).toEqual({ nombre: null, link: null });
+  });
+  it("limpiarNombreTienda rechaza textos de botón y nombres vacíos o larguísimos", () => {
+    expect(limpiarNombreTienda("Vendido por  ACME  SA")).toBe("ACME SA");
+    expect(limpiarNombreTienda("Visitar tienda oficial")).toBeNull();
+    expect(limpiarNombreTienda("")).toBeNull();
+    expect(limpiarNombreTienda("x".repeat(120))).toBeNull();
+  });
+});
+
+describe("elegirVendedor — más fuentes para el nombre cuando el link dice «Ver tienda»", () => {
+  const URL_FICHA = "https://www.mercadolibre.com.co/esterilizador/up/MCOU123";
+  it("usa el title/aria-label del link", () => {
+    const r = elegirVendedor([{ href: "/tienda/enfantasy", texto: "Ir a la tienda", titulo: "Enfantasy", enSeller: true }], "", URL_FICHA, []);
+    expect(r).toEqual({ nombre: "Enfantasy", link: "https://www.mercadolibre.com.co/tienda/enfantasy" });
+  });
+  it("lee «Vendido por X» del bloque del vendedor y corta en la medalla", () => {
+    const r = elegirVendedor([{ href: "/perfil/X", texto: "Ver más productos", titulo: "", enSeller: true }], "", URL_FICHA, ["Vendido por DR BROWNS\nMercadoLíder | +10 mil ventas"]);
+    expect(r.nombre).toBe("DR BROWNS");
+    expect(r.link).toBe("https://www.mercadolibre.com.co/perfil/X");
+  });
+  it("sin link en la ficha: nombre del bloque + link armado con el seller_id", () => {
+    const r = elegirVendedor([], '"seller_id":777', URL_FICHA, ["Vendido por Grownsy Colombia MercadoLíder"]);
+    expect(r).toEqual({ nombre: "Grownsy Colombia", link: "https://listado.mercadolibre.com.co/_CustId_777" });
+  });
+  it("nickname junto al seller_id o seller_name en el JSON incrustado", () => {
+    expect(elegirVendedor([], '{"seller_id":55,"nickname":"TIENDA UNO"}', URL_FICHA, []).nombre).toBe("TIENDA UNO");
+    expect(elegirVendedor([], '{"seller_name":"TIENDA DOS"}', URL_FICHA, []).nombre).toBe("TIENDA DOS");
+  });
+  it("nombreDeTextoVendidoPor no inventa: sin «Vendido por» es null", () => {
+    expect(nombreDeTextoVendidoPor("Envío gratis a todo el país")).toBeNull();
+    expect(nombreDeTextoVendidoPor("Vendido por ACME SA")).toBe("ACME SA");
+  });
+});
