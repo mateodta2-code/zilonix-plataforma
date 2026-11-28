@@ -325,3 +325,62 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* Registro de compras (27-nov): el formulario «Agregar compra» ocupa todo
+   el cuadro en una cuadrícula de 6 columnas y 3 líneas; en celular, 2. */
+.gridCompra {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px 14px;
+  align-items: end;
+}
+
+.gridCompra > *,
+.gridCompra label {
+  min-width: 0;
+}
+
+.gridCompra :global(.zx-control) {
+  width: 100%;
+  min-width: 0;
+}
+
+.span2 {
+  grid-column: span 2;
+}
+
+.span3 {
+  grid-column: span 3;
+}
+
+.celdaBoton {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.celdaBoton > * {
+  width: 100%;
+}
+
+.skuConBoton {
+  display: flex;
+  gap: 6px;
+}
+
+.skuConBoton > button {
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .gridCompra {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .span3 {
+    grid-column: span 2;
+  }
+
+  .celdaBoton {
+    grid-column: 1 / -1;
+  }
+}
