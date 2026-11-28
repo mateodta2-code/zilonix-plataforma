@@ -6,6 +6,7 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import { esUuid, validarCantidad } from "@/lib/inventario/calculos";
 import { aplicarMovimientosTx, SkuNoValidoParaStockError } from "@/lib/inventario/movimientos";
 import { validarMonto } from "@/lib/finanzas/montos";
+import { aCentavos } from "@/lib/finanzas/utilidad-venta";
 import { patronBusquedaLike } from "@/lib/filtros-listado";
 import { SkuCodigoDuplicadoError } from "@/lib/ml/sku";
 import { notaRecepcion, validarCodigoSku, validarDatosCompra, type DatosCompra } from "@/lib/inventario/registro-compras";
@@ -192,6 +193,72 @@ export async function actualizarDatosCompra(empresaId: string, usuarioId: string
       entidad: "ordenes_compra",
       entidadId: ordenId,
       detalle: `Actualizó los datos de compra de OC-${filas[0].numero}.`,
+    });
+  });
+}
+
+// Corrige cantidad y valor unidad de las líneas de una OC (27-nov,
+// Registro de compras). Reglas para no romper inventario ni pagos:
+// - cantidad: solo si no ha llegado nada (OC «abierta»); lo recibido
+//   ya está en el kardex y no se reescribe.
+// - valor unidad: solo si la OC no está liquidada (ya se pagó por ese
+//   valor) ni anulada.
+export async function actualizarLineasCompra(
+  empresaId: string,
+  usuarioId: string,
+  ordenId: string,
+  lineas: { itemId: string; cantidad: number; costoUnitario: string | null }[]
+): Promise<void> {
+  if (!esUuid(ordenId)) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
+  if (lineas.length === 0) throw new CompraInvalidaError("No hay líneas para corregir.");
+  if (!lineas.every((l) => esUuid(l.itemId))) throw new CompraInvalidaError("Esa línea no es de esta orden.");
+  const validas = lineas.map((l) => {
+    validarCantidad("entrada", l.cantidad);
+    return { ...l, costoUnitario: validarMonto(l.costoUnitario, "Valor unidad") };
+  });
+
+  await dbComoEmpresa(empresaId, async (tx) => {
+    const [orden] = await tx
+      .select({ numero: ordenesCompra.numero, estado: ordenesCompra.estado, fechaPago: ordenesCompra.fechaPago })
+      .from(ordenesCompra)
+      .where(and(eq(ordenesCompra.empresaId, empresaId), eq(ordenesCompra.id, ordenId)))
+      .for("update");
+    if (!orden) throw new CompraInvalidaError("Esa orden de compra no existe en esta empresa.");
+    if (orden.estado === "anulada") throw new CompraInvalidaError("La orden está anulada: no se corrige.");
+    const actuales = await tx
+      .select({ id: ordenCompraItems.id, cantidad: ordenCompraItems.cantidadPedida, costo: ordenCompraItems.costoUnitario })
+      .from(ordenCompraItems)
+      .where(and(eq(ordenCompraItems.empresaId, empresaId), eq(ordenCompraItems.ordenCompraId, ordenId)));
+    const porId = new Map(actuales.map((a) => [a.id, a]));
+    const cambios: string[] = [];
+    for (const l of validas) {
+      const actual = porId.get(l.itemId);
+      if (!actual) throw new CompraInvalidaError("Esa línea no es de esta orden.");
+      const cambiaCantidad = l.cantidad !== actual.cantidad;
+      // En centavos: «1000» del formulario y «1000.00» de la base son lo mismo.
+      const centavos = (m: string | null) => (m === null ? null : aCentavos(m));
+      const cambiaCosto = centavos(l.costoUnitario) !== centavos(actual.costo);
+      if (cambiaCantidad && orden.estado !== "abierta") {
+        throw new CompraInvalidaError("Ya llegó mercancía de esta orden: la cantidad no se corrige (lo recibido ya está en el kardex).");
+      }
+      if (cambiaCosto && orden.fechaPago) throw new CompraInvalidaError("La compra ya está liquidada: el valor unidad no se corrige.");
+      if (!cambiaCantidad && !cambiaCosto) continue;
+      await tx
+        .update(ordenCompraItems)
+        .set({ cantidadPedida: l.cantidad, costoUnitario: l.costoUnitario })
+        .where(and(eq(ordenCompraItems.empresaId, empresaId), eq(ordenCompraItems.id, l.itemId)));
+      cambios.push(`${cambiaCantidad ? `cantidad ${actual.cantidad}→${l.cantidad}` : ""}${cambiaCantidad && cambiaCosto ? ", " : ""}${cambiaCosto ? `valor ${actual.costo ?? "—"}→${l.costoUnitario ?? "—"}` : ""}`);
+    }
+    if (cambios.length === 0) return;
+    await tx.update(ordenesCompra).set({ actualizadoTs: new Date() }).where(and(eq(ordenesCompra.empresaId, empresaId), eq(ordenesCompra.id, ordenId)));
+    await registrarAuditoria(tx, {
+      empresaId,
+      usuarioId,
+      actorTipo: "persona",
+      accion: "inventario.orden_compra_corregida",
+      entidad: "ordenes_compra",
+      entidadId: ordenId,
+      detalle: `Corrigió OC-${orden.numero}: ${cambios.join("; ")}.`,
     });
   });
 }

@@ -20,7 +20,7 @@ import {
 import { crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { crearCuentaMlDePrueba } from "./test-utils/venta";
 import { crearBodega } from "../lib/inventario/bodegas";
-import { actualizarDatosCompra, CompraInvalidaError, crearOrdenCompra, listarRegistroCompras, registrarCompra, registrarRecepcion } from "../lib/inventario/compras";
+import { actualizarDatosCompra, actualizarLineasCompra, CompraInvalidaError, crearOrdenCompra, listarRegistroCompras, registrarCompra, registrarRecepcion } from "../lib/inventario/compras";
 import { SkuCodigoDuplicadoError } from "../lib/ml/sku";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
 import { guardarConfiguracionInventario } from "../lib/inventario/configuracion";
@@ -305,5 +305,41 @@ describe("inventario (RLS, issue #280)", () => {
     await expect(
       dbComoEmpresa(c.empresaAId, (tx) => tx.update(ordenesCompra).set({ linkCompra: "javascript:alert(1)" }).where(eq(ordenesCompra.id, ordenRegistro)))
     ).rejects.toThrow();
+  });
+
+  it("corregir cantidad y valor: cantidad solo sin nada recibido, valor solo sin liquidar, y B no toca la OC de A", async () => {
+    const { id: oc } = await registrarCompra(c.empresaAId, c.usuarioAId, {
+      producto: { nuevo: { codigo: "FULCOR0001", nombre: "Para corregir" } },
+      cantidad: 3,
+      costoUnitario: "2000",
+      bodegaDestinoId: bodegaA,
+      terceroId: null,
+      nota: null,
+      compra: {},
+    });
+    const linea = async () =>
+      (await dbComoEmpresa(c.empresaAId, (tx) => tx.select().from(ordenCompraItems).where(eq(ordenCompraItems.ordenCompraId, oc))))[0];
+    const item = await linea();
+
+    // Abierta: se corrigen las dos cosas.
+    await actualizarLineasCompra(c.empresaAId, c.usuarioAId, oc, [{ itemId: item.id, cantidad: 5, costoUnitario: "2500" }]);
+    expect(await linea()).toMatchObject({ cantidadPedida: 5, costoUnitario: "2500.00" });
+    // «2500» y «2500.00» son el mismo valor: no cuenta como cambio.
+    await actualizarLineasCompra(c.empresaAId, c.usuarioAId, oc, [{ itemId: item.id, cantidad: 5, costoUnitario: "2500.00" }]);
+
+    // B no corrige la OC de A.
+    await expect(actualizarLineasCompra(c.empresaBId, c.usuarioBId, oc, [{ itemId: item.id, cantidad: 9, costoUnitario: null }])).rejects.toBeInstanceOf(CompraInvalidaError);
+
+    // Llegó algo: la cantidad queda fija, el valor todavía se corrige.
+    await registrarRecepcion(c.empresaAId, c.usuarioAId, { recepcionId: randomUUID(), ordenCompraId: oc, bodegaId: bodegaA, nota: null, lineas: [{ skuId: item.skuId, cantidad: 1 }] });
+    await expect(actualizarLineasCompra(c.empresaAId, c.usuarioAId, oc, [{ itemId: item.id, cantidad: 6, costoUnitario: "2500" }])).rejects.toThrow(/cantidad no se corrige/);
+    await actualizarLineasCompra(c.empresaAId, c.usuarioAId, oc, [{ itemId: item.id, cantidad: 5, costoUnitario: "2600" }]);
+    expect((await linea()).costoUnitario).toBe("2600.00");
+
+    // Liquidada: el valor queda fijo.
+    // (Directo en la base: la regla solo mira fecha_pago; marcarla desde
+    // Por pagar pide permisos de finanzas que este contexto no arma.)
+    await dbComoEmpresa(c.empresaAId, (tx) => tx.update(ordenesCompra).set({ fechaPago: "2026-11-27", medioPago: "MATEO AMEX" }).where(eq(ordenesCompra.id, oc)));
+    await expect(actualizarLineasCompra(c.empresaAId, c.usuarioAId, oc, [{ itemId: item.id, cantidad: 5, costoUnitario: "3000" }])).rejects.toThrow(/liquidada/);
   });
 });

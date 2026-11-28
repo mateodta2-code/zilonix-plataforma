@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { requierePermiso } from "@/lib/permisos";
-import { actualizarDatosCompra, anularOrdenCompra, crearOrdenCompra, registrarCompra, registrarRecepcion } from "@/lib/inventario/compras";
+import { actualizarDatosCompra, actualizarLineasCompra, anularOrdenCompra, crearOrdenCompra, registrarCompra, registrarRecepcion } from "@/lib/inventario/compras";
 import { GastoInvalidoError } from "@/lib/finanzas/gastos";
 import { marcarOrdenCompraPagada, OrdenCompraNoEncontradaError } from "@/lib/finanzas/por-pagar-db";
 import { conAviso, enteroDe, lineasDelFormulario, mensajeParaPersona, textoDe, usuarioYEmpresaActiva } from "@/lib/inventario/sesion";
@@ -152,4 +152,29 @@ export async function marcarLiquidadoAction(formData: FormData) {
     throw error;
   }
   redirect(conAviso(ruta, "ok", "Compra marcada como liquidada."));
+}
+
+// Corrige cantidad y valor unidad de las líneas (las reglas viven en
+// actualizarLineasCompra: cantidad solo sin nada recibido; valor solo sin
+// liquidar).
+export async function actualizarLineasCompraAction(formData: FormData) {
+  const { usuarioId, empresaId } = await usuarioYEmpresaActiva();
+  await requierePermiso(usuarioId, empresaId, "inventario", "crear");
+
+  const ordenCompraId = String(formData.get("ordenCompraId") ?? "");
+  const ruta = `${RUTA}/${encodeURIComponent(ordenCompraId)}`;
+  const lineas = [];
+  for (let i = 0; i < 200; i++) {
+    const itemId = String(formData.get(`item_${i}`) ?? "").trim();
+    if (!itemId) break;
+    lineas.push({ itemId, cantidad: enteroDe(formData.get(`cantidad_${i}`)), costoUnitario: textoDe(formData.get(`valor_${i}`)) });
+  }
+  try {
+    await actualizarLineasCompra(empresaId, usuarioId, ordenCompraId, lineas);
+  } catch (error) {
+    const mensaje = mensajeParaPersona(error);
+    if (!mensaje) throw error;
+    redirect(conAviso(ruta, "error", mensaje));
+  }
+  redirect(conAviso(ruta, "ok", "Cantidad y valor guardados."));
 }

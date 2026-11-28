@@ -154,7 +154,7 @@ export const GUIA: GrupoGuia[] = [
           "Bodegas: registra dónde guardas la mercancía (si todavía no tienes ninguna, Inventario te muestra el enlace «Ir a Bodegas»). La principal es la primera que se usa para reservar pedidos.",
           "Inventario: ve el stock por bodega y haz ajustes o traslados. «Para ML» es lo que se publica.",
           "Registro de compras: cada producto que compras es una fila con fecha, cantidad, total, forma de pago, plataforma, SKU, liquidado, orden y link de la plataforma, y entrega estimada. En «+ Agregar compra» elige un SKU que ya existe o crea el producto: el SKU se sugiere solo (FUL + letras + números) y lo puedes cambiar. Busca por producto, SKU, plataforma, OC u orden.",
-          "Para recibir la mercancía abre su OC (columna OC): al registrar la recepción el stock sube y el kardex dice de qué OC vinieron las unidades. Ahí mismo corriges los datos de la compra y la marcas como liquidada.",
+          "Para recibir la mercancía abre su OC (columna OC): al registrar la recepción el stock sube y el kardex dice de qué OC vinieron las unidades. Ahí mismo corriges los datos de la compra, la cantidad (mientras no llegue nada) y el valor unidad (mientras no esté liquidada), y la marcas como liquidada.",
           "Trazabilidad de inventario: el historial de cada movimiento, con quién lo hizo. No se edita ni se borra.",
           "Devoluciones, Inventario Full y Proyección de inventarios: en construcción.",
         ],
