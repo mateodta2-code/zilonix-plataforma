@@ -1,7 +1,7 @@
 import { acotarPagina, normalizarParametro, parsearPagina } from "@/lib/filtros-listado";
 import { listarCuentasFalabellaParaSelector, listarUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella-consulta";
 import type { EstadoUtilidadFalabella, OrdenUtilidadFalabella } from "@/lib/finanzas/utilidad-falabella";
-import { RANGO_MAXIMO_DIAS_FINANZAS, resolverRangoVentas } from "@/lib/finanzas/ventas-pantalla";
+import { normalizarBusqueda, RANGO_MAXIMO_DIAS_FINANZAS, resolverRangoVentas } from "@/lib/finanzas/ventas-pantalla";
 import { Boton, BotonLink } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Chip, type EstadoChip } from "@/components/marco/Chip";
@@ -10,7 +10,7 @@ import { CeldaTabla, FilaTabla, Tabla } from "@/components/marco/Tabla";
 import { TarjetaKpi } from "@/components/marco/TarjetaKpi";
 import { BotonTraerVentasFalabella } from "./BotonTraerVentasFalabella";
 import { DefectosCuentaFalabella } from "./DefectosCuentaFalabella";
-import { fechaHoraBogota, mostrarMontoIso, mostrarPorcentaje } from "./formato";
+import { fechaHoraBogota, mostrarMontoIso, mostrarPorcentaje, tonoMargen } from "./formato";
 import { LapizMontoFalabella } from "./LapizMontoFalabella";
 import estilos from "./ventasUtilidad.module.css";
 import { SkuCopiable } from "@/components/marco/SkuCopiable";
@@ -80,6 +80,10 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
   const estado = FILTROS_ESTADO.find((e) => e === estadoParam);
   const rango = resolverRangoVentas(normalizarParametro(searchParams.desde), normalizarParametro(searchParams.hasta), new Date(), RANGO_MAXIMO_DIAS_FINANZAS);
 
+  // Buscador (27-nov, igual que Mercado Libre): número de orden, SKU o
+  // nombre. Param «buscar».
+  const buscarTexto = (normalizarParametro(searchParams.buscar) ?? "").slice(0, 120);
+  const buscar = normalizarBusqueda(buscarTexto);
   const desdeForm = rango.rango?.desde ?? normalizarParametro(searchParams.desde) ?? "";
   const hastaForm = rango.rango?.hasta ?? normalizarParametro(searchParams.hasta) ?? "";
   const href = (cambios: Record<string, string | undefined>) => {
@@ -89,6 +93,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       desde: desdeForm,
       hasta: hastaForm,
       estado,
+      buscar: buscarTexto || undefined,
       ...cambios,
     };
     for (const [k, v] of Object.entries(base)) if (v) params.set(k, v);
@@ -116,6 +121,9 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       </Campo>
       <Campo etiqueta="Hasta">
         <input type="date" name="hasta" defaultValue={hastaForm} className="zx-control" />
+      </Campo>
+      <Campo etiqueta="Buscar SKU, orden o producto">
+        <input type="search" name="buscar" defaultValue={buscarTexto} placeholder="Ej. FULCOL5737X2 o el Nº de orden" className="zx-control" />
       </Campo>
       <Campo etiqueta="Órdenes">
         <select name="estado" defaultValue={estado ?? ""} className="zx-control">
@@ -165,6 +173,7 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
     hasta: rango.rango.hasta,
     inicio: rango.rango.inicio,
     finExclusivo: rango.rango.finExclusivo,
+    buscar,
   });
   if (!consulta.ok) {
     return (
@@ -260,7 +269,9 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
       <section className={estilos.seccion}>
         <h2 className={estilos.tituloSeccion}>Detalle por orden · Falabella</h2>
         {ordenesFiltradas.length === 0 ? (
-          <EstadoVacio>No hay órdenes de Falabella en este rango.</EstadoVacio>
+          <EstadoVacio>
+            {buscar ? `No hay órdenes de Falabella que coincidan con «${buscarTexto}» en este rango.` : "No hay órdenes de Falabella en este rango."}
+          </EstadoVacio>
         ) : (
           <div className={estilos.tablaCompacta}>
             <Tabla
@@ -364,7 +375,10 @@ export async function UtilidadFalabella({ empresaId, usuarioId, searchParams, ru
                     <CeldaTabla numerica>{montoOrden(o.promociones)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.otros)}</CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.utilidad)}</CeldaTabla>
-                    <CeldaTabla numerica>{sinReporte ? "—" : mostrarPorcentaje(o.porcentajeUtilidad)}</CeldaTabla>
+                    {/* Semáforo del margen (27-nov), mismos cortes que Mercado Libre. */}
+                    <CeldaTabla numerica className={sinReporte ? undefined : estilos[`margen_${tonoMargen(o.porcentajeUtilidad) ?? "sin"}`]}>
+                      {sinReporte ? "—" : mostrarPorcentaje(o.porcentajeUtilidad)}
+                    </CeldaTabla>
                     <CeldaTabla numerica>{montoOrden(o.retenciones)}</CeldaTabla>
                     <CeldaTabla>
                       <Chip estado={ETIQUETA_ESTADO[o.estado].chip} title={

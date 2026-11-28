@@ -1,0 +1,1 @@
+- Finanzas → Ventas y utilidad, pestaña Falabella: buscador «Buscar SKU, orden o producto» (por Nº de orden, OrderId, SKU o nombre; al buscar no se suman los cobros sin orden) y semáforo del % util (verde desde 30 %, naranja desde 15 %, rojo debajo), igual que Mercado Libre.

@@ -4,6 +4,7 @@ import { costosSku, cuentasFalabella, movimientosMarketplace, pedidosFalabella, 
 import { requierePermiso } from "@/lib/permisos";
 import { normalizarSkuCodigo } from "@/lib/sku-normalizar";
 import { codigosParaMaestra } from "./combo-sku";
+import { ventaCoincideBusqueda } from "./ventas-pantalla";
 import { esProveedorDirecto } from "./envio-falabella";
 import {
   calcularUtilidadFalabella,
@@ -101,6 +102,11 @@ export type FiltroUtilidadFalabella = {
   hasta: string;
   inicio: Date;
   finExclusivo: Date;
+  // Buscador (27-nov, igual que la pestaña Mercado Libre), ya normalizado
+  // con normalizarBusqueda: número de orden, SKU o nombre del producto.
+  // Con búsqueda no entran los cobros sin orden (publicidad, servicios):
+  // no son de ninguna orden encontrada.
+  buscar?: string | null;
 };
 
 export type ResultadoConsultaUtilidadFalabella =
@@ -117,7 +123,7 @@ export async function listarUtilidadFalabella(
   const m = movimientosMarketplace;
 
   return dbComoEmpresa(empresaId, async (tx) => {
-    const pedidos = await tx
+    const todos = await tx
       .select({
         id: p.id,
         pedidoIdExterno: p.pedidoIdExterno,
@@ -146,8 +152,17 @@ export async function listarUtilidadFalabella(
       )
       .orderBy(desc(p.fecha))
       .limit(TOPE_ORDENES_UTILIDAD + 1);
-    const recortado = pedidos.length > TOPE_ORDENES_UTILIDAD;
-    if (recortado) pedidos.pop();
+    const recortado = todos.length > TOPE_ORDENES_UTILIDAD;
+    if (recortado) todos.pop();
+    const buscar = filtro.buscar ?? null;
+    const pedidos = buscar
+      ? todos.filter((x) =>
+          ventaCoincideBusqueda(buscar, {
+            pedidoIdExterno: [x.numeroOrden, x.pedidoIdExterno].filter(Boolean).join(" "),
+            lineas: parsearItemsApiFalabella(x.items).map((i) => ({ sku: i.sku, titulo: i.nombre })),
+          })
+        )
+      : todos;
 
     const monedas = new Set(pedidos.map((x) => x.moneda));
     if (monedas.size > 1) {
@@ -175,8 +190,9 @@ export async function listarUtilidadFalabella(
           moneda ? eq(m.moneda, moneda) : undefined,
           or(
             numeros.length > 0 ? inArray(m.numeroOrden, numeros) : sql`false`,
-            // Publicidad y servicios sin orden: por fecha de transacción.
-            and(isNull(m.numeroOrden), gte(m.fechaTransaccion, filtro.desde), lte(m.fechaTransaccion, filtro.hasta))
+            // Publicidad y servicios sin orden: por fecha de transacción
+            // (no con búsqueda: no son de ninguna orden encontrada).
+            buscar ? sql`false` : and(isNull(m.numeroOrden), gte(m.fechaTransaccion, filtro.desde), lte(m.fechaTransaccion, filtro.hasta))
           )
         )
       );
