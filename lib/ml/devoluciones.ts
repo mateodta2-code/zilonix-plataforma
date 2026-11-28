@@ -8,13 +8,10 @@
 import { conConcurrenciaLimitada } from "@/lib/concurrencia";
 import { idTexto, pedirLecturaMl, textoODefecto } from "@/lib/ml/cliente";
 import { listarCuentasConectadas, obtenerAccessTokenVigente } from "@/lib/ml/cuentas";
-import { PERIODOS_DIAS } from "@/lib/posventa/metricasDevoluciones";
 import { motivoCuentaSinRevisar } from "@/lib/ml/preguntas";
 import { leerFotoItemMl, leerOrdenMl, leerReclamoMl, obtenerMotivoReclamoMl, type ProductoVenta, type ReclamoBaseMl } from "@/lib/ml/reclamos";
 
 // Topes por carga: con muchas cuentas y usuarios, nunca una lectura sin límite.
-export const TAMANO_PAGINA_BUSQUEDA = 50;
-export const TOPE_PAGINAS_BUSQUEDA = 4;
 export const TOPE_LECTURAS_DEVOLUCION = 60;
 export const CONCURRENCIA_LECTURAS = 4;
 
@@ -221,34 +218,34 @@ export async function obtenerCostoEnvioDevolucionMl(reclamoId: string, token: st
   return opcional(async () => leerCostoEnvioMl(await leerJson(`/post-purchase/v1/claims/${reclamoId}/charges/return-cost`, token)));
 }
 
-// Query documentado de claims/search: acotado por rol, vendedor y fecha,
-// ordenado de más nuevo a más viejo y SIN `status` (entran abiertos y
-// cerrados). ISO con milisegundos y offset «-00:00», como en la doc de ML.
-export function armarQueryBusquedaReclamos(sellerId: string, desdeMs: number, offset: number): string {
-  exigirNumerico(sellerId);
-  const desde = new Date(desdeMs).toISOString().replace("Z", "-00:00");
-  return `?players.role=respondent&players.user_id=${sellerId}&range=date_created:after:${desde}&sort=date_created:desc&limit=${TAMANO_PAGINA_BUSQUEDA}&offset=${offset}`;
+// Búsqueda de reclamos (28-nov). La v1 con «players.role / players.user_id /
+// range / sort» respondía 400 en las tres cuentas de sharel (log de
+// staging, PR #764), y lib/ml/cliente.ts ya tenía confirmado que
+// /marketplace/v2/claims/search responde 400 «sin filtro, o con players».
+// Se usa la ÚNICA forma confirmada en producción (la de Reclamos y
+// mediaciones, buscarReclamosAbiertosMl): status=opened y limit ≤ 30, del
+// vendedor del token. Consecuencia: solo entran reclamos abiertos (una
+// devolución en camino tiene su reclamo abierto); las ya cerradas dejan de
+// listarse hasta confirmar otro filtro con una cuenta real. El corte por
+// fecha se hace después, en cargarDevolucionesEmpresa.
+export const RUTA_BUSQUEDA_RECLAMOS = "/marketplace/v2/claims/search";
+export const TAMANO_BUSQUEDA_V2 = 30;
+
+export function armarQueryBusquedaReclamos(): string {
+  return `?status=opened&limit=${TAMANO_BUSQUEDA_V2}`;
 }
 
-// Reclamos del vendedor en el periodo (candidatos; la devolución se confirma
-// aparte). Máx. TOPE_PAGINAS_BUSQUEDA llamadas. `truncado` = ML tiene más de
-// los que se leyeron. Si una página falla, lanza: la cuenta queda «sin revisar».
-export async function buscarReclamosConDevolucionMl(token: string, sellerId: string, desdeMs: number | null): Promise<{ reclamos: ReclamoConDevolucion[]; truncado: boolean }> {
+// Reclamos abiertos del vendedor del token, candidatos a tener devolución
+// (se confirma aparte con v2 claims/{id}/returns). Una sola llamada:
+// `truncado` = ML tiene más de los que se leyeron. Si falla, lanza: la
+// cuenta queda «sin revisar». sellerId solo se valida (el token ya dice
+// de quién son los reclamos).
+export async function buscarReclamosConDevolucionMl(token: string, sellerId: string): Promise<{ reclamos: ReclamoConDevolucion[]; truncado: boolean }> {
   exigirNumerico(sellerId);
-  const desde = desdeMs ?? Date.now() - Math.max(...PERIODOS_DIAS) * 24 * 60 * 60 * 1000;
-  const reclamos: ReclamoConDevolucion[] = [];
-  let leidos = 0;
-  for (let pagina = 0; pagina < TOPE_PAGINAS_BUSQUEDA; pagina++) {
-    const resp = await pedirLecturaMl<unknown>("/post-purchase/v1/claims/search", token, {
-      query: armarQueryBusquedaReclamos(sellerId, desde, pagina * TAMANO_PAGINA_BUSQUEDA),
-    });
-    if (!resp.ok) throw new Error(`Mercado Libre respondió ${resp.status} al listar los reclamos.`);
-    const lectura = leerReclamosConDevolucionMl(resp.data);
-    reclamos.push(...lectura.reclamos);
-    leidos += lectura.leidos;
-    if (lectura.leidos < TAMANO_PAGINA_BUSQUEDA || leidos >= lectura.total) return { reclamos, truncado: false };
-  }
-  return { reclamos, truncado: true };
+  const resp = await pedirLecturaMl<unknown>(RUTA_BUSQUEDA_RECLAMOS, token, { query: armarQueryBusquedaReclamos() });
+  if (!resp.ok) throw new Error(`Mercado Libre respondió ${resp.status} al listar los reclamos.`);
+  const lectura = leerReclamosConDevolucionMl(resp.data);
+  return { reclamos: lectura.reclamos, truncado: lectura.total > lectura.leidos };
 }
 
 // ---------- Orquestación por empresa (lista y métricas) ----------
@@ -288,7 +285,7 @@ export async function cargarDevolucionesEmpresa(empresaId: string, opciones: { c
   for (const cuenta of cuentas) {
     try {
       const token = await obtenerAccessTokenVigente(empresaId, cuenta.id);
-      const busqueda = await buscarReclamosConDevolucionMl(token, cuenta.cuentaIdExterna, opciones.desdeMs);
+      const busqueda = await buscarReclamosConDevolucionMl(token, cuenta.cuentaIdExterna);
       truncado = truncado || busqueda.truncado;
       for (const reclamo of busqueda.reclamos) {
         if (opciones.desdeMs !== null && fechaMs(reclamo.fecha) < opciones.desdeMs) continue;

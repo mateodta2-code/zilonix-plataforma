@@ -71,13 +71,11 @@ describe("estadoSimpleDevolucion", () => {
   });
 });
 
-describe("armarQueryBusquedaReclamos", () => {
-  it("query acotado, con milisegundos, orden desc y sin status", () => {
-    const q = armarQueryBusquedaReclamos("123", Date.UTC(2026, 9, 25), 50);
-    expect(q).toBe("?players.role=respondent&players.user_id=123&range=date_created:after:2026-10-25T00:00:00.000-00:00&sort=date_created:desc&limit=50&offset=50");
-    expect(q).not.toContain("status");
-  });
-  it("rechaza un vendedor no numérico", () => {
-    expect(() => armarQueryBusquedaReclamos("1&x=2", 0, 0)).toThrow();
+describe("armarQueryBusquedaReclamos (28-nov: v2, la forma confirmada)", () => {
+  it("solo status=opened y limit 30: sin players, range ni sort (la v1 con eso respondía 400)", () => {
+    const q = armarQueryBusquedaReclamos();
+    expect(q).toBe("?status=opened&limit=30");
+    expect(q).not.toContain("players");
+    expect(q).not.toContain("range");
   });
 });
