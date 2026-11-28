@@ -608,7 +608,7 @@
 /* ---------------------------------------------------------------------
    27-nov — detalle día a día con el estilo del Zilonix OS (pedido del
    usuario, con la información que ya tiene esta tabla): el día es una
-   franja con su resumen a la derecha, la cuenta una fila resaltada con
+   fila con sus totales por columna, la cuenta una fila resaltada con
    sus totales, encabezados en minúscula, números de ancho fijo, etiqueta
    de entrega con color y el margen con semáforo (30 % / 15 %).
    Solo tokens existentes; el ámbar es --kpi-advertencia-texto.
@@ -633,30 +633,40 @@
   color: var(--texto-suave);
 }
 
+/* Fila de grupos encima de las columnas («Lo que vendiste», «Lo que se
+   descuenta», «Lo que ganaste», «Datos»): en mayúscula con una línea
+   debajo; «Lo que ganaste» en azul. Solo la fila de nombres queda fija
+   al bajar (si las dos fueran sticky a top: 0, se taparían). */
+.tablaCompacta th.grupo,
+.tablaCompacta th.grupoVacio {
+  position: static;
+  padding: 8px 6px 0;
+  text-align: center !important;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--plata-medio);
+  border-bottom: 0;
+}
+
+.tablaCompacta th.grupo {
+  padding-bottom: 4px;
+  box-shadow: inset 0 -2px 0 var(--borde);
+}
+
+.tablaCompacta th.grupoResultado {
+  color: var(--acento-fuerte);
+  box-shadow: inset 0 -2px 0 var(--acento);
+}
+
 /* Números de ancho fijo, alineados como en el OS. */
 .tablaCompacta .numero {
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 11.5px;
 }
 
-/* Día: una sola franja con fecha y conteo a la izquierda y el resumen
-   (recaudo · utilidad · margen) a la derecha. */
-.celdaDia {
-  padding: 9px 10px;
-}
-
-.franjaDia {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 24px;
-  flex-wrap: wrap;
-}
-
-.tablaCompacta .franjaDia .controlNivel {
-  width: auto;
-}
-
+/* Día: fecha más marcada y conteo suave; sus totales van por columna. */
 .fechaDia {
   font-size: 13px;
   font-weight: 700;
@@ -667,18 +677,6 @@
   font-weight: 500;
   font-size: 11.5px;
   color: var(--texto-suave);
-}
-
-.resumenDia {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.separadorResumen {
-  color: var(--plata-oscuro);
 }
 
 /* Cuenta: fila resaltada con sus totales. */
@@ -771,7 +769,7 @@
 
 /* Primera columna fija al moverse de costado (con fondo propio para que
    los números no se vean por debajo). El encabezado ya queda fijo arriba
-   con <Tabla scroll>. La franja del día ocupa toda la fila. */
+   con <Tabla scroll>. */
 .tablaCompacta .filaProducto td:first-child {
   position: sticky;
   left: 0;
@@ -783,6 +781,13 @@
   position: sticky;
   left: 0;
   z-index: 1;
+}
+
+.tablaCompacta .filaDia td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--tabla-encabezado-fondo);
 }
 
 .tablaCompacta .filaProducto:hover td:first-child {
