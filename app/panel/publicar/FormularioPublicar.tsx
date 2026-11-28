@@ -306,9 +306,6 @@ export function FormularioPublicar({
         />
       </Tarjeta>
 
-      {/* --- Publicar en Falabella: solo si hay una cuenta de Falabella marcada --- */}
-      {falabellaMarcadas.length > 0 && <SeccionFalabella cuentaId={falabellaMarcadas[0].id} tituloSugerido={tituloReferencia.slice(0, 60)} />}
-
       {/* --- Punto 4: Datos generales --- */}
       <Tarjeta className={styles.seccion}>
         <p className="zx-etiqueta">Datos generales (iguales para todas)</p>
@@ -318,7 +315,7 @@ export function FormularioPublicar({
         <Campo etiqueta="Stock (c/u)">
           <input name="stock" type="number" className="zx-control" value={stock} onChange={(e) => setStock(e.target.value)} />
         </Campo>
-        <Campo etiqueta="SKU propio (opcional)">
+        <Campo etiqueta="SKU (el mismo para Mercado Libre y Falabella; en Falabella es obligatorio)">
           <input name="sku" className="zx-control" value={sku} onChange={(e) => setSku(e.target.value)} />
         </Campo>
         <Campo etiqueta="Condición">
@@ -445,7 +442,7 @@ export function FormularioPublicar({
             </Boton>
           )}
         </div>
-        {cuentasMarcadas.length === 0 ? (
+        {cuentasMarcadas.length === 0 && falabellaMarcadas.length === 0 ? (
           <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>Elige al menos una cuenta destino arriba para completar su título y descripción.</p>
         ) : (
           <div style={{ marginTop: 10 }}>
@@ -479,6 +476,45 @@ export function FormularioPublicar({
                 </div>
               </div>
             ))}
+            {falabellaMarcadas.map((c) => {
+              const titulo = datosPorCuenta[c.id]?.titulo ?? "";
+              return (
+                <div key={c.id} className={`${styles.recuadroMarca} ${styles.filaCuentaDetalle}`}>
+                  <PortadaCuenta
+                    portadaUrl={datosPorCuenta[c.id]?.portadaUrl ?? ""}
+                    onChange={(url) => actualizarCuenta(c.id, "portadaUrl", url)}
+                    cloudinaryConfigurado={cloudinaryConfigurado}
+                    previaGaleria={imagenes[0] ?? null}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <Campo etiqueta={`Título en ${c.nickname} (Falabella, máximo 60, sin marcas)`}>
+                      <input name={`titulo_${c.id}`} className="zx-control" value={titulo} onChange={(e) => actualizarCuenta(c.id, "titulo", e.target.value)} />
+                    </Campo>
+                    <p style={{ fontSize: 12, color: titulo.length > 60 ? "var(--kpi-peligro-texto)" : "var(--texto-suave)", marginTop: 4 }}>
+                      {titulo.length}/60
+                      {tituloReferencia && (
+                        <>
+                          {" · "}
+                          <button type="button" className="zx-enlace" onClick={() => actualizarCuenta(c.id, "titulo", tituloReferencia.slice(0, 60))}>
+                            Usar el título de Mercado Libre
+                          </button>
+                        </>
+                      )}
+                    </p>
+                    <Campo etiqueta={`Descripción en ${c.nickname}`}>
+                      <textarea
+                        name={`descripcion_${c.id}`}
+                        rows={2}
+                        className="zx-control"
+                        value={datosPorCuenta[c.id]?.descripcion ?? ""}
+                        onChange={(e) => actualizarCuenta(c.id, "descripcion", e.target.value)}
+                      />
+                    </Campo>
+                    <input type="hidden" name={`portada_${c.id}`} value={datosPorCuenta[c.id]?.portadaUrl ?? ""} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
         {/* Todas las cuentas CONECTADAS necesitan su propio campo
@@ -492,7 +528,7 @@ export function FormularioPublicar({
 
       {/* --- Punto 6: características de la categoría (variantes adentro) --- */}
       <Tarjeta className={styles.seccion}>
-        <p className="zx-etiqueta">Características de la categoría</p>
+        <p className="zx-etiqueta">Características de la categoría — Mercado Libre</p>
         <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 8 }}>
           Mercado Libre exige elegir una categoría real y completar sus atributos antes de poder publicar — detectamos la categoría según el
           título de la primera cuenta elegida; si se equivoca, puedes buscarla a mano o navegar el árbol real.
@@ -539,6 +575,9 @@ export function FormularioPublicar({
         <textarea name="atributosExtra" value={atributosExtraTexto} readOnly hidden />
         <textarea name="variantes" value={variantesTexto} readOnly hidden />
       </Tarjeta>
+
+      {/* --- Características de la categoría en Falabella (mismo lugar que las de Mercado Libre) --- */}
+      {falabellaMarcadas.length > 0 && <SeccionFalabella cuentaId={falabellaMarcadas[0].id} sku={sku} titulo={datosPorCuenta[falabellaMarcadas[0].id]?.titulo || tituloReferencia} />}
 
       {/* --- Punto 7: modo prueba + publicar --- */}
       <Tarjeta className={styles.seccion}>

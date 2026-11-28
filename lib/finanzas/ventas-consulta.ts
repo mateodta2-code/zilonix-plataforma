@@ -14,12 +14,12 @@
 // (detalle-ventas.ts) en BigInt. Si un mes de 16 cuentas carga lento, la
 // optimización con agregación SQL queda anotada para después.
 
-import { and, asc, eq, gte, inArray, lt, notInArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { dbComoEmpresa } from "@/db/empresa-context";
-import { cuentasMl, pedidoItems, pedidos, pedidosFinanzas, usuarios, ventasCorrecciones } from "@/db/schema";
-import { ESTADOS_QUE_NO_SON_VENTA } from "@/lib/estados-venta";
+import { cuentasMl, devolucionesInventario, pedidoItems, pedidos, pedidosFinanzas, usuarios, ventasCorrecciones } from "@/db/schema";
 import { requierePermiso } from "@/lib/permisos";
 import { armarDetalleVentas, type DetalleVentas } from "./detalle-ventas";
+import { motivoFueraDeUtilidad, ordenarFueraDeUtilidad, type VentaFueraDeUtilidad } from "./fuera-de-utilidad";
 import {
   CAMPOS_CORREGIBLES,
   EntradaUtilidadInvalidaError,
@@ -72,8 +72,10 @@ export type ResultadoVentasUtilidad = {
   resumenCuentas: ResumenCuenta[];
   // pedido_id → pedido_id_externo, para enlazar y mostrar el número de ML.
   pedidoIdExterno: Record<string, string>;
-  // Pedidos con reembolsos > 0: marca "con devolución · revisar".
-  conDevolucion: string[];
+  // Canceladas, reembolsadas (total o parcial) y con reclamo de
+  // devolución: no suman a la utilidad y se listan aparte
+  // (lib/finanzas/fuera-de-utilidad.ts). Ignora el filtro de costo.
+  fueraDeUtilidad: VentaFueraDeUtilidad[];
   // Avisos del armado (comisión o flete sin dato) por pedido.
   avisosArmado: Record<string, AvisoArmado[]>;
   // Ventas que el motor rechazó: no rompen la página, se listan aparte.
@@ -117,14 +119,12 @@ export async function listarVentasUtilidad(
   await requierePermiso(usuarioId, empresaId, "finanzas", "consultar");
   validarFiltro(filtro);
 
-  const { cabeceras, lineas, correcciones } = await dbComoEmpresa(empresaId, async (tx) => {
+  const { cabeceras, lineas, correcciones, reclamos } = await dbComoEmpresa(empresaId, async (tx) => {
     const condiciones = [
       gte(pedidos.fecha, filtro.desde),
       lt(pedidos.fecha, filtro.hastaExclusivo),
-      // Sin ícono de quitar (#131): las cancelled/invalid y las canceladas
-      // por reembolso total no aparecen ni suman.
-      notInArray(pedidos.estado, ESTADOS_QUE_NO_SON_VENTA),
-      eq(pedidosFinanzas.cancelada, false),
+      // Las canceladas y devueltas también se leen (28-nov): no suman,
+      // pero van a la pestaña «Canceladas y devoluciones».
     ];
     if (filtro.cuentaId) condiciones.push(eq(pedidosFinanzas.cuentaMlId, filtro.cuentaId));
 
@@ -152,6 +152,25 @@ export async function listarVentasUtilidad(
       .innerJoin(pedidos, eq(pedidos.id, pedidosFinanzas.pedidoId))
       .innerJoin(cuentasMl, eq(cuentasMl.id, pedidosFinanzas.cuentaMlId))
       .where(and(...condiciones));
+
+    // Reclamos de devolución (Productos → Devoluciones) de estas órdenes,
+    // salvo los anulados: la venta sale de la utilidad desde el reclamo.
+    const ordenes = [...new Set(cabeceras.map((c) => c.pedidoIdExterno))];
+    const reclamos: { cuentaMlId: string | null; pedidoIdExterno: string | null }[] = [];
+    for (const tanda of enTandas(ordenes)) {
+      reclamos.push(
+        ...(await tx
+          .select({ cuentaMlId: devolucionesInventario.cuentaMlId, pedidoIdExterno: devolucionesInventario.pedidoIdExterno })
+          .from(devolucionesInventario)
+          .where(
+            and(
+              isNotNull(devolucionesInventario.cuentaMlId),
+              inArray(devolucionesInventario.pedidoIdExterno, tanda),
+              ne(devolucionesInventario.estado, "anulada")
+            )
+          ))
+      );
+    }
 
     const ids = cabeceras.map((c) => c.pedidoId);
     const lineas: FilaLinea[] = [];
@@ -186,14 +205,16 @@ export async function listarVentasUtilidad(
           .where(inArray(ventasCorrecciones.pedidoId, tanda)))
       );
     }
-    return { cabeceras, lineas, correcciones };
+    return { cabeceras, lineas, correcciones, reclamos };
   });
 
   const lineasPorPedido = agrupar(lineas);
   const correccionesPorPedido = agrupar(correcciones);
 
+  const conReclamo = new Set(reclamos.map((r) => `${r.cuentaMlId}|${r.pedidoIdExterno}`));
+
   const pedidoIdExterno: Record<string, string> = {};
-  const conDevolucion: string[] = [];
+  const fueraDeUtilidad: VentaFueraDeUtilidad[] = [];
   const avisosArmado: Record<string, AvisoArmado[]> = {};
   const rechazadas: VentaRechazada[] = [];
   const entradasDetalle = [];
@@ -210,6 +231,28 @@ export async function listarVentasUtilidad(
       continue;
     }
     pedidoIdExterno[cabecera.pedidoId] = cabecera.pedidoIdExterno;
+    const motivo = motivoFueraDeUtilidad({
+      estado: cabecera.estado,
+      cancelada: cabecera.cancelada,
+      reembolsos: cabecera.reembolsos,
+      tieneReclamo: conReclamo.has(`${cabecera.cuentaMlId}|${cabecera.pedidoIdExterno}`),
+    });
+    if (motivo) {
+      fueraDeUtilidad.push({
+        pedidoId: cabecera.pedidoId,
+        pedidoIdExterno: cabecera.pedidoIdExterno,
+        fechaCreacion: cabecera.fechaCreacion,
+        cuenta: cabecera.nickname,
+        estado: cabecera.estado,
+        motivo,
+        productos: lineasVenta.map((l) => ({ titulo: l.titulo, sku: l.skuCodigo, cantidad: l.cantidad })),
+        valorVenta: cabecera.valorVenta,
+        reembolsos: cabecera.reembolsos,
+        comisionMl: cabecera.comisionMl,
+        fleteMl: cabecera.fleteMl,
+      });
+      continue;
+    }
     let resultado: ResultadoVenta;
     try {
       const { entrada, avisos } = armarVentaEntrada(
@@ -226,7 +269,6 @@ export async function listarVentasUtilidad(
     }
     if (filtro.costo === "con" && !resultado.con_costo) continue;
     if (filtro.costo === "sin" && resultado.con_costo) continue;
-    if (aCentavos(cabecera.reembolsos) > CERO) conDevolucion.push(cabecera.pedidoId);
     entradasDetalle.push({
       resultado,
       estado: cabecera.estado,
@@ -241,7 +283,14 @@ export async function listarVentasUtilidad(
 
   const detalle = armarDetalleVentas(entradasDetalle, { agruparPor: "creacion" });
   rechazadas.sort((a, b) => (a.pedidoIdExterno < b.pedidoIdExterno ? -1 : 1));
-  return { detalle, resumenCuentas: resumirPorCuenta(detalle), pedidoIdExterno, conDevolucion, avisosArmado, rechazadas };
+  return {
+    detalle,
+    resumenCuentas: resumirPorCuenta(detalle),
+    pedidoIdExterno,
+    fueraDeUtilidad: ordenarFueraDeUtilidad(fueraDeUtilidad),
+    avisosArmado,
+    rechazadas,
+  };
 }
 
 function agrupar<T extends { pedidoId: string }>(filas: T[]): Map<string, T[]> {

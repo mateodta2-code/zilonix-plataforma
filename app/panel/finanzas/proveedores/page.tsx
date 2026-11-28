@@ -101,8 +101,8 @@ export default async function ProveedoresPage({ searchParams }: { searchParams: 
         </section>
       )}
 
-      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
-        Volver a Finanzas
+      <BotonLink href="/panel/finanzas/configuracion" variante="fantasma" className={styles.volver}>
+        Volver a Configuración
       </BotonLink>
     </>
   );

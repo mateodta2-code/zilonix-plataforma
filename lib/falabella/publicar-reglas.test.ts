@@ -77,13 +77,22 @@ describe("construirBorrador", () => {
     expect(construirBorrador({ ...base, imagenes: ["http://x.com/1.jpg"] }).problemas.join(" ")).toMatch(/https/);
   });
 
-  it("bloquea sin SKU con dígitos, sin precio, sin categoría o sin marca real", () => {
+  it("bloquea sin SKU con dígitos, sin precio o sin categoría (Modelo ya no bloquea)", () => {
     const b = construirBorrador({ ...base, sku: "ABC", precioOferta: 0, categoriaId: 0, modelo: " " });
-    expect(b.problemas.length).toBe(4);
+    expect(b.problemas.length).toBe(3);
   });
 });
 
 describe("XML", () => {
+  it("Variation va a nivel producto (default Único) y nunca dentro de ProductData", () => {
+    const xml = xmlProductCreate(construirBorrador({ ...base, modelo: "" }));
+    expect(xml).toContain("</Name><Variation>Único</Variation>");
+    expect(xml).not.toContain("<Modelo>");
+    const conValor = xmlProductCreate(construirBorrador({ ...base, atributos: { Variation: "Negro" } }));
+    expect(conValor.match(/<Variation>/g)?.length).toBe(1);
+    expect(conValor).toContain("<Variation>Negro</Variation>");
+  });
+
   it("ProductCreate incluye marca, EAN, precios, oferta, IVA y el atributo Modelo", () => {
     const xml = xmlProductCreate(construirBorrador(base));
     expect(xml).toContain("<Brand>GENERICO</Brand>");

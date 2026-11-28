@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { Boton } from "@/components/marco/Boton";
 import { Tarjeta } from "@/components/marco/Tarjeta";
 import type { BorradorFalabella, EstadoPublicacionFalabella } from "@/lib/falabella/publicar-reglas";
-import { aprobarFalabellaAction, avanzarFalabellaAction, descartarFalabellaAction } from "./falabella-actions";
+import { aprobarFalabellaAction, atributosFalabellaAction, avanzarFalabellaAction, corregirFalabellaAction, descartarFalabellaAction } from "./falabella-actions";
+import { camposAcorregir, traducirErrorFalabella } from "@/lib/falabella/errores";
 import styles from "./publicar.module.css";
 
 export type PublicacionFalabella = {
   id: string;
   cuenta: string;
+  cuentaId: string;
   sku: string;
   titulo: string;
   estado: EstadoPublicacionFalabella;
@@ -30,6 +32,58 @@ const ETIQUETA: Record<EstadoPublicacionFalabella, string> = {
 const pesos = (n: number) => `$${n.toLocaleString("es-CO")}`;
 
 const SEGUNDOS_ENTRE_CONSULTAS = 20;
+
+// Rechazo por campos faltantes o inválidos: se muestran esos mismos campos
+// (con la lista de opciones cuando la categoría la define) para llenarlos y
+// volver a borrador. Así no depende de haber adivinado bien al crear.
+function CorregirRechazo({ p, onListo }: { p: PublicacionFalabella; onListo: (error?: string) => void }) {
+  const campos = camposAcorregir(p.errores);
+  const [opciones, setOpciones] = useState<Record<string, string[]>>({});
+  const [valores, setValores] = useState<Record<string, string>>({});
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => {
+    if (campos.length === 0) return;
+    atributosFalabellaAction(p.cuentaId, p.borrador.categoriaId).then((r) => {
+      if (r.ok) setOpciones(Object.fromEntries(r.datos.map((a) => [a.nombre, a.opciones])));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- una vez por fila
+  }, [p.id]);
+  const sobran = p.errores.some((e) => /is\/are not applicable/i.test(e));
+  if (campos.length === 0 && !sobran) return null;
+  async function guardar() {
+    setGuardando(true);
+    const r = await corregirFalabellaAction(p.id, valores);
+    setGuardando(false);
+    onListo(r.ok ? undefined : r.error);
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <p style={{ fontSize: 13, margin: "4px 0" }}>{campos.length > 0 ? "Llena lo que Falabella pidió y vuelve a enviarlo:" : "Falabella no acepta un atributo en esta categoría; se quita al guardar."}</p>
+      {campos.map((c) => (
+        <label key={c} style={{ display: "block", fontSize: 13, marginTop: 6 }}>
+          {c}
+          {(opciones[c] ?? []).length > 0 ? (
+            <select className="zx-control" value={valores[c] ?? ""} onChange={(e) => setValores((v) => ({ ...v, [c]: e.target.value }))}>
+              <option value="">Elegir…</option>
+              {opciones[c].map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input className="zx-control" value={valores[c] ?? ""} onChange={(e) => setValores((v) => ({ ...v, [c]: e.target.value }))} />
+          )}
+        </label>
+      ))}
+      <div style={{ marginTop: 8 }}>
+        <Boton type="button" variante="primario" chico disabled={guardando} onClick={guardar}>
+          Guardar y volver a borrador
+        </Boton>
+      </div>
+    </div>
+  );
+}
 
 export function HistorialFalabella({ publicaciones }: { publicaciones: PublicacionFalabella[] }) {
   const router = useRouter();
@@ -114,9 +168,19 @@ export function HistorialFalabella({ publicaciones }: { publicaciones: Publicaci
                 ))}
               {p.errores.map((m) => (
                 <p key={m} style={{ fontSize: 12, margin: "2px 0", color: "var(--kpi-peligro-texto)" }}>
-                  {m}
+                  {traducirErrorFalabella(m)}
                 </p>
               ))}
+
+              {p.estado === "rechazado" && (
+                <CorregirRechazo
+                  p={p}
+                  onListo={(e) => {
+                    if (e) setMensaje(e);
+                    router.refresh();
+                  }}
+                />
+              )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 {p.estado === "borrador" && (

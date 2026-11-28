@@ -2,6 +2,7 @@ import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { normalizarParametro } from "@/lib/filtros-listado";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
 import { tienePermiso } from "@/lib/roles";
+import { listarCuentasConectadas as listarCuentasFalabella } from "@/lib/falabella/cuentas";
 import { leerCuentasMpPorCobrar, leerPartidasPorCobrar, type CuentaMpPorCobrar } from "@/lib/finanzas/por-cobrar-consulta";
 import {
   agruparPorCuenta,
@@ -36,6 +37,11 @@ import { sincronizarPorCobrarMpAction } from "./actions";
 // cuenta; los totales nunca mezclan monedas. Mercado Pago: «Actualizar
 // desde Mercado Pago» (finanzas.modificar) guarda los pagos sin liberar en
 // pagos_mp_por_cobrar; al abrir la página no se llama a Mercado Pago.
+//
+// Conciliación Falabella ya no tiene ítem en el menú (pocas empresas
+// venden en Falabella): se entra desde el botón de esta página, que solo
+// sale si la empresa tiene o tuvo una cuenta de Falabella, o cortes de
+// Falabella por cobrar.
 
 const RUTA = "/panel/finanzas/por-cobrar";
 
@@ -77,10 +83,17 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
   let todas;
   let cuentasMp: CuentaMpPorCobrar[];
   let puedeModificar = false;
+  let tieneCuentaFalabella = false;
   try {
     const miMembresia = await requierePermiso(usuario.id, empresa.id, "finanzas", "consultar");
     puedeModificar = tienePermiso(miMembresia.permisos, "finanzas", "modificar");
-    [todas, cuentasMp] = await Promise.all([leerPartidasPorCobrar(empresa.id, usuario.id), leerCuentasMpPorCobrar(empresa.id, usuario.id)]);
+    let cuentasFalabella;
+    [todas, cuentasMp, cuentasFalabella] = await Promise.all([
+      leerPartidasPorCobrar(empresa.id, usuario.id),
+      leerCuentasMpPorCobrar(empresa.id, usuario.id),
+      listarCuentasFalabella(empresa.id),
+    ]);
+    tieneCuentaFalabella = cuentasFalabella.length > 0;
   } catch (error) {
     if (!(error instanceof SinPermisoError)) throw error;
     return <SinAcceso mensaje={`Tu rol (${rolNombre}) no tiene acceso a Finanzas.`} />;
@@ -103,6 +116,7 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
   const retenido = totales.filter((t) => t.retenido !== "0.00");
   const error = normalizarParametro(searchParams.error);
   const ok = normalizarParametro(searchParams.ok);
+  const verFalabella = tieneCuentaFalabella || todas.some((p) => p.marketplace === "falabella");
   const montoDe = (monto: string | null, moneda: string) => (monto === null ? "Sin neto" : mostrarMontoIso(monto, moneda));
 
   return (
@@ -110,6 +124,13 @@ export default async function PorCobrarPage({ searchParams }: { searchParams: Re
       <EncabezadoPagina
         titulo="Cuentas por cobrar"
         descripcion="Lo que Mercado Libre y Falabella todavía no te han pagado: ventas con la plata sin liberar y cortes de Falabella sin pagar."
+        accion={
+          verFalabella ? (
+            <BotonLink href="/panel/finanzas/falabella" variante="secundario">
+              Conciliación Falabella
+            </BotonLink>
+          ) : undefined
+        }
       />
 
       {error && <p className={styles.avisoError}>{error}</p>}

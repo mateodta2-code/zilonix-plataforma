@@ -103,6 +103,19 @@ export default async function ConfiguracionFinanzasPage({ searchParams }: { sear
         )}
       </Tarjeta>
 
+      {/* Proveedores ya no tiene ítem en el menú (pedido de Sharel,
+          2026-11-28): es configuración que se pone una vez — el packing
+          de cada proveedor y los transportadores habituales. */}
+      <Tarjeta>
+        <h2 className={styles.tituloSeccion}>Proveedores y transportadores</h2>
+        <p className={styles.ayuda}>El packing se pone una vez por proveedor y cada SKU lo toma de su proveedor en la Tabla maestra de SKU.</p>
+        <div className={styles.acciones}>
+          <BotonLink href="/panel/finanzas/proveedores" variante="secundario">
+            Ver proveedores y transportadores
+          </BotonLink>
+        </div>
+      </Tarjeta>
+
       <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
         Volver a Finanzas
       </BotonLink>

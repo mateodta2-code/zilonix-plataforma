@@ -9,7 +9,10 @@ import { listarCuentasConectadas, obtenerCredenciales } from "@/lib/falabella/cu
 import { aplanarHojas, obtenerArbolCategorias, obtenerAtributosCategoria, type AtributoCategoria } from "@/lib/falabella/catalogo";
 import { construirBorrador, type BorradorFalabella, type EntradaBorradorFalabella } from "@/lib/falabella/publicar-reglas";
 import { BorradorConProblemasError } from "@/lib/falabella/publicar";
-import { aprobarYCrear, avanzar, descartar } from "@/lib/falabella/publicaciones";
+import { aprobarYCrear, avanzar, corregirRechazado, descartar } from "@/lib/falabella/publicaciones";
+import { obtenerConexionIAParaModulo } from "@/lib/ia/conexion";
+import { llamarIA } from "@/lib/ia/proveedores";
+import { leerRespuestaCategorias, preseleccionarCategorias, promptCategoriaFalabella } from "@/lib/falabella/categorias-sugeridas";
 import { FalabellaApiError, FalabellaNoDisponibleError } from "@/lib/falabella/cliente";
 
 // Fases 1 y 2 de "Publicar en Falabella". Todo pasa por aquí (servidor): la
@@ -118,5 +121,42 @@ export async function descartarFalabellaAction(id: string): Promise<Resultado<nu
     const empresaId = await empresaConPermiso("modificar", id);
     await descartar(empresaId, id);
     return null;
+  });
+}
+
+// Llena los campos que Falabella pidió en un rechazo y devuelve la
+// publicación a borrador (se vuelve a aprobar a mano).
+export async function corregirFalabellaAction(id: string, atributos: Record<string, string>): Promise<Resultado<null>> {
+  return envolver(async () => {
+    const empresaId = await empresaConPermiso("modificar", id);
+    const limpios: Record<string, string> = {};
+    for (const [nombre, valor] of Object.entries(atributos)) {
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,60}$/.test(nombre) || typeof valor !== "string") continue;
+      if (valor.trim()) limpios[nombre] = valor.trim().slice(0, 500);
+    }
+    await corregirRechazado(empresaId, id, limpios);
+    return null;
+  });
+}
+
+// Botón «Recomendar categoría». Falabella no tiene sugerencia por API:
+// se preselecciona por palabras del título y, si la empresa conectó una IA
+// para «Publicaciones», ella elige las 3 mejores entre esas opciones.
+export async function recomendarCategoriaFalabellaAction(cuentaId: string, titulo: string): Promise<Resultado<{ categorias: { id: number; ruta: string }[]; conIA: boolean }>> {
+  return envolver(async () => {
+    const { empresaId, cred } = await contexto("consultar", cuentaId);
+    if (!titulo.trim()) throw new Error("Escribe primero el título para poder recomendar una categoría.");
+    const candidatas = preseleccionarCategorias(aplanarHojas(await obtenerArbolCategorias(cred)), titulo, 40);
+    if (candidatas.length === 0) return { categorias: [], conIA: false };
+    const conexion = await obtenerConexionIAParaModulo(empresaId, "publicaciones");
+    if (conexion) {
+      try {
+        const elegidas = leerRespuestaCategorias(await llamarIA(conexion, promptCategoriaFalabella(titulo, candidatas), { maxTokens: 200 }), candidatas);
+        if (elegidas.length > 0) return { categorias: elegidas, conIA: true };
+      } catch {
+        // Sin IA o falla: se cae a la preselección por palabras.
+      }
+    }
+    return { categorias: candidatas.slice(0, 5), conIA: false };
   });
 }
