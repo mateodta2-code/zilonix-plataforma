@@ -1,0 +1,8 @@
+- **feat-optimizacion-competidores-seguimiento** (sin migración) — **Competencia con la extensión: seguimiento real** (extensión **0.3.48**).
+  - **Fichas que sí se leen:** corregido el bug por el que los 10 competidores salían «solo datos del listado» (Chrome oculta `tab.url` sin permiso `tabs`; ver `extension/LEEME.md` v0.3.48). Con eso vuelven Full, envío gratis, fotos, antigüedad, ventas/mes, facturación, disponibles y tienda.
+  - **Agregar competidor por link:** pega el link de una publicación de Mercado Libre; la extensión lee solo esa ficha y queda guardada como «agregada por link». «Buscar de nuevo» conserva esos y reemplaza los de la búsqueda.
+  - **Quitar** un competidor de la lista (queda guardado sin él) y **Actualizar datos** de todos los guardados (una ficha que falla no pisa los datos buenos). Hasta 30 por publicación; sin migración (la lista sigue en `optimizacion_competidores_ext.competidores`, que ahora admite lista vacía).
+  - **Foto ampliable:** vista previa al pasar el mouse y visor al hacer clic (Esc cierra), en tamaño original (`-O`) de Mercado Libre.
+  - **Columnas nuevas:** Tienda, Disponibles (`+50` = mínimo), Actualizado.
+  - **Más parecidos:** del listado se leen los 10 cuyo título comparte más palabras con la publicación propia, y cada fila muestra «Muy parecido / Parecido / Poco parecido». Compara títulos, no fotos.
+  - **Pendiente:** comparar fotos para confirmar «es el mismo producto»; guardar los descartados para que «Buscar de nuevo» no los vuelva a traer; actualización automática diaria.

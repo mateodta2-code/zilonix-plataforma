@@ -219,6 +219,18 @@ function esUrlFinalDeMercadoLibre(url) {
   return typeof url === "string" && PATRON_DOMINIO_IMPORTAR_LINK_PERMITIDO.test(url);
 }
 
+// Esta extensión no pide el permiso "tabs" ni host_permissions de
+// Mercado Libre (a propósito, para la Chrome Web Store): Chrome le
+// OCULTA `tab.url` de esas pestañas. Antes, "url ausente" se trataba
+// como "no es Mercado Libre" y nunca se pedía leer la ficha (todas
+// quedaban "solo datos del listado"). Ahora: ausente = se pide leer
+// igual (content.js solo existe en dominios de Mercado Libre, así que
+// en cualquier otro sitio el mensaje no llega a nadie); presente y
+// ajeno = nunca se lee.
+function urlPermiteLeerFicha(url) {
+  return typeof url !== "string" || esUrlFinalDeMercadoLibre(url);
+}
+
 // Evita que un clic repetido (o un reenvío del mismo mensaje) dispare
 // varias lecturas casi juntas — mismo criterio y mismo storage
 // (chrome.storage.session, sobrevive un reciclado del Service Worker)
@@ -296,7 +308,7 @@ function iniciarImportarLink(tabIdSolicitante, link) {
       chrome.tabs.onUpdated.removeListener(alActualizarTab);
       const activa = lecturasLinkActivas.get(tabIdSolicitante);
       if (activa) activa.listenerOnUpdated = null; // ya no hay nada que sacar al cancelar/terminar
-      if (!esUrlFinalDeMercadoLibre(urlFinal)) {
+      if (!urlPermiteLeerFicha(tabActualizada && tabActualizada.url)) {
         terminarLecturaLink(tabIdSolicitante, { tipo: "zilonix:importar-link-error", payload: { razon: "no_es_mercadolibre" } });
         return;
       }
@@ -1109,10 +1121,45 @@ function esRemitenteOptimizacion(remitente) {
   return ORIGENES_SELLER_PERMITIDOS_PUBLICAR.some((origen) => urlRemitente.startsWith(`${origen}/panel/optimizacion`));
 }
 
+// Palabras que no distinguen un producto de otro (artículos, conectores
+// y relleno de títulos de Mercado Libre).
+const PALABRAS_SIN_PESO_COMPETIDORES = new Set([
+  "para", "con", "sin", "del", "los", "las", "una", "uno", "unos", "unas", "por", "que", "como", "mas", "muy", "the", "and", "set", "kit", "pack", "nuevo", "nueva", "original", "envio", "gratis", "full", "oferta",
+]);
+
+// Puro — palabras que sí distinguen un título (sin tildes, minúsculas,
+// números y medidas como "18w" o "40cm" incluidos).
+function palabrasClaveDeTitulo(titulo) {
+  if (typeof titulo !== "string") return [];
+  const limpio = titulo
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((p) => p.length >= 2 && !PALABRAS_SIN_PESO_COMPETIDORES.has(p));
+  return Array.from(new Set(limpio));
+}
+
+// Puro — 0 a 1: qué parte de las palabras clave del título propio
+// aparece también en el candidato. null si no hay título propio contra
+// el que comparar.
+function parecidoDeTitulos(tituloPropio, tituloOtro) {
+  const propias = palabrasClaveDeTitulo(tituloPropio);
+  if (propias.length === 0) return null;
+  const otras = new Set(palabrasClaveDeTitulo(tituloOtro));
+  let comunes = 0;
+  for (const p of propias) if (otras.has(p)) comunes++;
+  return comunes / propias.length;
+}
+
 // Puro — del listado escaneado a los candidatos: solo links reales de
 // Mercado Libre (mismo allowlist anclado de "Traer datos de ese link"),
-// sin la publicación propia, sin repetidos, como máximo 10.
-function elegirCandidatosCompetidores(productos, excluirItemId) {
+// sin la publicación propia, sin repetidos, como máximo 10. Con el
+// título propio, del listado (≈48 resultados) se eligen los 10 MÁS
+// PARECIDOS (no los 10 primeros): una búsqueda de "luces led" trae
+// diseños distintos y los que comparten más palabras con la publicación
+// propia suelen ser el mismo producto. Empates: el orden de Mercado Libre.
+function elegirCandidatosCompetidores(productos, excluirItemId, tituloPropio) {
   const vistos = new Set();
   const candidatos = [];
   for (const p of Array.isArray(productos) ? productos : []) {
@@ -1122,8 +1169,33 @@ function elegirCandidatosCompetidores(productos, excluirItemId) {
     const clave = itemId || p.link;
     if (vistos.has(clave)) continue;
     vistos.add(clave);
-    candidatos.push({ link: p.link, itemId, desdeListado: p });
-    if (candidatos.length >= TOPE_COMPETIDORES_EXTENSION) break;
+    candidatos.push({ link: p.link, itemId, desdeListado: p, parecido: parecidoDeTitulos(tituloPropio, p.titulo) });
+  }
+  if (typeof tituloPropio === "string" && tituloPropio.trim()) {
+    candidatos.sort((x, y) => (y.parecido ?? 0) - (x.parecido ?? 0)); // Array.sort es estable
+  }
+  return candidatos.slice(0, TOPE_COMPETIDORES_EXTENSION);
+}
+
+// "Agregar por link" y "Actualizar": links que ya conoce la persona (o
+// que ya están guardados) — mismo allowlist de dominio, sin repetidos,
+// como máximo TOPE_LINKS_COMPETIDORES.
+const TOPE_LINKS_COMPETIDORES = 30;
+function elegirCandidatosPorLinks(links, excluirItemId) {
+  const vistos = new Set();
+  const candidatos = [];
+  for (const crudo of Array.isArray(links) ? links : []) {
+    const link = typeof crudo === "string" ? crudo : crudo && typeof crudo.link === "string" ? crudo.link : "";
+    if (!link || !esLinkImportarValido(link)) continue;
+    const m = link.match(/(MCO|ML[ABMCU]|MPE)-?(\d{6,15})/i);
+    const itemIdCrudo = crudo && typeof crudo === "object" && typeof crudo.itemId === "string" ? crudo.itemId : m ? (m[1] + m[2]).toUpperCase() : null;
+    const itemId = itemIdCrudo && PATRON_ITEM_ID_ML.test(itemIdCrudo) ? itemIdCrudo : null;
+    if (itemId && itemId === excluirItemId) continue;
+    const clave = itemId || link;
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    candidatos.push({ link, itemId, desdeListado: null, parecido: null });
+    if (candidatos.length >= TOPE_LINKS_COMPETIDORES) break;
   }
   return candidatos;
 }
@@ -1174,13 +1246,14 @@ function finalizarCompetidores(tabIdPanel) {
     payload: {
       excluirItemId: estado.excluirItemId,
       termino: estado.termino,
+      modo: estado.modo,
       candidatos: estado.candidatos.length,
       competidores: estado.resultados,
     },
   });
 }
 
-function iniciarCompetidores(tabIdPanel, termino, pais, excluirItemId) {
+function iniciarCompetidores(tabIdPanel, termino, pais, excluirItemId, opciones) {
   const anterior = competidoresActivos.get(tabIdPanel);
   if (anterior) {
     limpiarEsperaCompetidor(anterior);
@@ -1188,9 +1261,27 @@ function iniciarCompetidores(tabIdPanel, termino, pais, excluirItemId) {
     if (anterior.tabId != null) chrome.tabs.remove(anterior.tabId, () => void chrome.runtime.lastError);
   }
   const paisValido = typeof pais === "string" && DOMINIOS_ML_PAIS[pais] ? pais : "CO";
-  const estado = { tabId: null, fase: "listado", termino, excluirItemId, candidatos: [], indice: 0, resultados: [], timeoutId: null, listener: null };
+  const tituloPropio = opciones && typeof opciones.tituloPropio === "string" ? opciones.tituloPropio.slice(0, 300) : "";
+  const porLinks = opciones && Array.isArray(opciones.links) ? elegirCandidatosPorLinks(opciones.links, excluirItemId) : null;
+  if (porLinks && porLinks.length === 0) {
+    chrome.tabs.sendMessage(tabIdPanel, { tipo: "zilonix:competidores-error", payload: { razon: "sin_resultados", excluirItemId, termino } }, () => void chrome.runtime.lastError);
+    return;
+  }
+  const estado = {
+    tabId: null,
+    fase: porLinks ? "ficha" : "listado",
+    modo: porLinks ? "links" : "busqueda",
+    termino,
+    tituloPropio,
+    excluirItemId,
+    candidatos: porLinks || [],
+    indice: 0,
+    resultados: [],
+    timeoutId: null,
+    listener: null,
+  };
   competidoresActivos.set(tabIdPanel, estado);
-  chrome.tabs.create({ url: urlListadoMl(termino, paisValido), active: true }, (tab) => {
+  chrome.tabs.create({ url: porLinks ? "about:blank" : urlListadoMl(termino, paisValido), active: true }, (tab) => {
     if (competidoresActivos.get(tabIdPanel) !== estado) {
       if (tab && tab.id != null) chrome.tabs.remove(tab.id, () => void chrome.runtime.lastError);
       return;
@@ -1200,6 +1291,10 @@ function iniciarCompetidores(tabIdPanel, termino, pais, excluirItemId) {
       return;
     }
     estado.tabId = tab.id;
+    if (porLinks) {
+      leerSiguienteCompetidor(tabIdPanel);
+      return;
+    }
     estado.timeoutId = setTimeout(() => terminarCompetidores(tabIdPanel, errorCompetidores(estado, "sin_resultados")), TIEMPO_MAX_LISTADO_COMPETIDORES_MS);
   });
 }
@@ -1214,7 +1309,7 @@ function recibirListadoCompetidores(tabIdPanel, payload) {
     terminarCompetidores(tabIdPanel, errorCompetidores(estado, "captcha"));
     return;
   }
-  estado.candidatos = elegirCandidatosCompetidores(payload && payload.productos, estado.excluirItemId);
+  estado.candidatos = elegirCandidatosCompetidores(payload && payload.productos, estado.excluirItemId, estado.tituloPropio);
   if (estado.candidatos.length === 0) {
     terminarCompetidores(tabIdPanel, errorCompetidores(estado, "sin_resultados"));
     return;
@@ -1237,8 +1332,7 @@ function leerSiguienteCompetidor(tabIdPanel) {
   // siguiente carga o el tope de 15 s.
   function alActualizar(idActualizado, cambioInfo, tabActualizada) {
     if (idActualizado !== estado.tabId || cambioInfo.status !== "complete") return;
-    const urlFinal = tabActualizada && typeof tabActualizada.url === "string" ? tabActualizada.url : "";
-    if (!esUrlFinalDeMercadoLibre(urlFinal)) return;
+    if (!urlPermiteLeerFicha(tabActualizada && tabActualizada.url)) return;
     chrome.tabs.sendMessage(estado.tabId, { tipo: "zilonix:leer-competidor" }, () => void chrome.runtime.lastError);
   }
   estado.listener = alActualizar;
@@ -1258,7 +1352,7 @@ function avanzarCompetidor(tabIdPanel, datos) {
   const l = candidato.desdeListado || {};
   estado.resultados.push(
     datos
-      ? { ...datos, link: candidato.link, itemId: datos.itemId || candidato.itemId, foto: datos.foto || l.foto || null, leidoDeFicha: true }
+      ? { ...datos, link: candidato.link, itemId: datos.itemId || candidato.itemId, foto: datos.foto || l.foto || null, leidoDeFicha: true, parecido: candidato.parecido ?? null }
       : {
           titulo: typeof l.titulo === "string" ? l.titulo : null,
           precio: typeof l.precio === "number" ? l.precio : null,
@@ -1271,6 +1365,7 @@ function avanzarCompetidor(tabIdPanel, datos) {
           itemId: candidato.itemId,
           link: candidato.link,
           leidoDeFicha: false,
+          parecido: candidato.parecido ?? null,
         }
   );
   estado.indice++;
@@ -1348,13 +1443,15 @@ chrome.runtime.onMessage.addListener((mensaje, remitente, sendResponse) => {
     const payload = mensaje.payload || {};
     const termino = typeof payload.termino === "string" ? payload.termino.trim().slice(0, LARGO_MAXIMO_TERMINO_COMPETIDORES) : "";
     const excluirItemId = typeof payload.excluirItemId === "string" && PATRON_ITEM_ID_ML.test(payload.excluirItemId) ? payload.excluirItemId : null;
-    if (!termino || !excluirItemId) return;
+    const links = Array.isArray(payload.links) ? payload.links.slice(0, TOPE_LINKS_COMPETIDORES * 2) : null;
+    if ((!termino && !links) || !excluirItemId) return;
+    const tituloPropio = typeof payload.tituloPropio === "string" ? payload.tituloPropio : "";
     chrome.storage.session.get({ ultimoCompetidoresMs: 0 }, (datosCooldown) => {
       const ahoraMs = Date.now();
       const ultimoMs = typeof datosCooldown.ultimoCompetidoresMs === "number" ? datosCooldown.ultimoCompetidoresMs : 0;
       if (ahoraMs - ultimoMs < COOLDOWN_COMPETIDORES_MS) return;
       chrome.storage.session.set({ ultimoCompetidoresMs: ahoraMs });
-      iniciarCompetidores(tabIdPanel, termino, payload.pais, excluirItemId);
+      iniciarCompetidores(tabIdPanel, termino, payload.pais, excluirItemId, { links, tituloPropio });
     });
     return;
   }
