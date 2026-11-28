@@ -1,0 +1,5 @@
+- Productos → Registro de compras como la hoja «PRODUCTOS COMPRADOS» del Zilonix OS: una fila por producto con fecha, nombre, cantidad, total, valor unidad, forma de pago, plataforma, SKU, liquidado, orden y link de la plataforma, fecha de entrega, días en llegar, entrega estimada y días que faltan (o «atrasada»). Buscador por producto, SKU, plataforma, OC, orden, forma de pago y fecha.
+- «+ Agregar compra»: elige un SKU existente o crea el producto en la misma compra, con SKU sugerido (FUL + 3 letras + 4 números) y editable. Plataforma y forma de pago con lista y texto libre.
+- En el detalle de la OC: editar los datos de la compra y marcarla como liquidada (mismo pago que Finanzas → Por pagar, con su permiso).
+- Al recibir, el movimiento del kardex dice de qué OC son las unidades («OC-12 · nota»).
+- Migración 0059: `ordenes_compra` suma `fecha_compra`, `forma_pago`, `plataforma`, `orden_plataforma`, `link_compra` (solo http/https) y `entrega_estimada`, todas opcionales.

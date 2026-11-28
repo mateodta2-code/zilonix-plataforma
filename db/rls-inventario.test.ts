@@ -20,7 +20,8 @@ import {
 import { crearDosEmpresas, type ContextoDosEmpresas } from "./test-utils/aislamiento";
 import { crearCuentaMlDePrueba } from "./test-utils/venta";
 import { crearBodega } from "../lib/inventario/bodegas";
-import { crearOrdenCompra, registrarRecepcion } from "../lib/inventario/compras";
+import { actualizarDatosCompra, CompraInvalidaError, crearOrdenCompra, listarRegistroCompras, registrarCompra, registrarRecepcion } from "../lib/inventario/compras";
+import { SkuCodigoDuplicadoError } from "../lib/ml/sku";
 import { aplicarMovimientos } from "../lib/inventario/movimientos";
 import { guardarConfiguracionInventario } from "../lib/inventario/configuracion";
 import { listarInventarioParaExportar, listarKardexParaExportar, stockPorBodegaDeSkus } from "../lib/inventario/stock";
@@ -243,5 +244,66 @@ describe("inventario (RLS, issue #280)", () => {
     const kardex = await listarKardexParaExportar(c.empresaAId, { skuId: skuA }, 1);
     expect(kardex.filas).toHaveLength(1);
     expect(kardex.recortado).toBe(true);
+  });
+
+  it("Registro de compras: crea producto y SKU en la compra, B no la ve ni la edita, y el kardex dice OC-N", async () => {
+    const compra = {
+      fechaCompra: "2026-05-14",
+      formaPago: "MATEO AMEX",
+      plataforma: "Amazon",
+      ordenPlataforma: "114-0000001",
+      linkCompra: "https://www.amazon.com/dp/PRUEBA",
+      entregaEstimada: "2026-06-04",
+    };
+    const { id: ordenRegistro, numero } = await registrarCompra(c.empresaAId, c.usuarioAId, {
+      producto: { nuevo: { codigo: "fulreg1234", nombre: "Producto del registro" } },
+      cantidad: 4,
+      costoUnitario: "1000",
+      bodegaDestinoId: bodegaA,
+      terceroId: null,
+      nota: null,
+      compra,
+    });
+
+    const [fila] = await listarRegistroCompras(c.empresaAId, "FULREG1234");
+    expect(fila).toMatchObject({ ordenId: ordenRegistro, skuCodigo: "FULREG1234", producto: "Producto del registro", cantidad: 4, total: "4000.00", ...compra });
+    expect(fila.liquidado).toBeNull();
+    expect(await listarRegistroCompras(c.empresaAId, "amazon")).toEqual(expect.arrayContaining([expect.objectContaining({ ordenId: ordenRegistro })]));
+    // B no ve la compra de A, ni buscando su SKU o su plataforma.
+    expect(await listarRegistroCompras(c.empresaBId, "FULREG1234")).toHaveLength(0);
+    expect(await listarRegistroCompras(c.empresaBId, "Amazon")).toHaveLength(0);
+    // B no puede editar la OC de A.
+    await expect(actualizarDatosCompra(c.empresaBId, c.usuarioBId, ordenRegistro, { plataforma: "Temu" })).rejects.toBeInstanceOf(CompraInvalidaError);
+
+    // El mismo SKU dos veces: error claro y sin dejar otra OC.
+    await expect(
+      registrarCompra(c.empresaAId, c.usuarioAId, {
+        producto: { nuevo: { codigo: "FULREG1234", nombre: "Repetido" } },
+        cantidad: 1,
+        costoUnitario: null,
+        bodegaDestinoId: bodegaA,
+        terceroId: null,
+        nota: null,
+        compra: {},
+      })
+    ).rejects.toBeInstanceOf(SkuCodigoDuplicadoError);
+    expect(await listarRegistroCompras(c.empresaAId, "Repetido")).toHaveLength(0);
+
+    // Al recibir, el kardex dice de qué OC son las unidades.
+    const [{ id: skuRegistro }] = await dbComoEmpresa(c.empresaAId, (tx) => tx.select({ id: skus.id }).from(skus).where(eq(skus.codigo, "FULREG1234")));
+    const recepcionId = randomUUID();
+    await registrarRecepcion(c.empresaAId, c.usuarioAId, { recepcionId, ordenCompraId: ordenRegistro, bodegaId: bodegaA, nota: "Factura 55", lineas: [{ skuId: skuRegistro, cantidad: 4 }] });
+    const [mov] = await dbComoEmpresa(c.empresaAId, (tx) =>
+      tx.select({ nota: kardexMovimientos.nota }).from(kardexMovimientos).where(eq(kardexMovimientos.referenciaId, recepcionId))
+    );
+    expect(mov.nota).toBe(`OC-${numero} · Factura 55`);
+    const [recibida] = await listarRegistroCompras(c.empresaAId, "FULREG1234");
+    expect(recibida.estado).toBe("recibida");
+    expect(recibida.fechaEntrega).not.toBeNull();
+
+    // La base rechaza un link que no sea http(s), aunque alguien se salte la app.
+    await expect(
+      dbComoEmpresa(c.empresaAId, (tx) => tx.update(ordenesCompra).set({ linkCompra: "javascript:alert(1)" }).where(eq(ordenesCompra.id, ordenRegistro)))
+    ).rejects.toThrow();
   });
 });

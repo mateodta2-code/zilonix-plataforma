@@ -1825,6 +1825,18 @@ export const ordenesCompra = pgTable(
     // recepción: una orden se puede pagar antes de que llegue.
     fechaPago: date("fecha_pago", { mode: "string" }),
     medioPago: text("medio_pago"),
+    // Registro de compras (27-nov, como la hoja «PRODUCTOS COMPRADOS» del
+    // Zilonix OS): datos de la compra en la plataforma. Todos opcionales:
+    // las OC de antes no los tienen. fecha_compra vacía = se muestra la
+    // fecha de creación. forma_pago es la tarjeta o cuenta con que se
+    // pagó al comprar (texto: las tarjetas de crédito no son cuentas de
+    // Disponible); el pago al proveedor sigue en fecha_pago/medio_pago.
+    fechaCompra: date("fecha_compra", { mode: "string" }),
+    formaPago: text("forma_pago"),
+    plataforma: text("plataforma"),
+    ordenPlataforma: text("orden_plataforma"),
+    linkCompra: text("link_compra"),
+    entregaEstimada: date("entrega_estimada", { mode: "string" }),
     creadoTs: timestamp("creado_ts", { withTimezone: true }).notNull().defaultNow(),
     creadoPor: uuid("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
     actualizadoTs: timestamp("actualizado_ts", { withTimezone: true }).notNull().defaultNow(),
@@ -1832,6 +1844,12 @@ export const ordenesCompra = pgTable(
   (t) => ({
     // Un medio de pago sin fecha de pago no dice nada: o las dos o ninguna.
     medioConFecha: check("ordenes_compra_medio_con_fecha", sql`${t.medioPago} is null or ${t.fechaPago} is not null`),
+    // Topes de los textos del Registro de compras (la app valida antes;
+    // esto es la red). El link solo http(s): nunca javascript: ni data:.
+    formaPagoLargo: check("ordenes_compra_forma_pago_largo", sql`${t.formaPago} is null or char_length(${t.formaPago}) between 1 and 60`),
+    plataformaLargo: check("ordenes_compra_plataforma_largo", sql`${t.plataforma} is null or char_length(${t.plataforma}) between 1 and 40`),
+    ordenPlataformaLargo: check("ordenes_compra_orden_plataforma_largo", sql`${t.ordenPlataforma} is null or char_length(${t.ordenPlataforma}) between 1 and 80`),
+    linkCompraHttp: check("ordenes_compra_link_compra_http", sql`${t.linkCompra} is null or (${t.linkCompra} ~* '^https?://' and char_length(${t.linkCompra}) <= 500)`),
     empresaIdUnica: unique("ordenes_compra_empresa_id_unica").on(t.empresaId, t.id),
     numeroUnico: unique("ordenes_compra_empresa_numero_unico").on(t.empresaId, t.numero),
     delTercero: foreignKey({
