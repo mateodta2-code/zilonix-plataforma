@@ -61,6 +61,7 @@ type NodoAtributo = {
   Label?: string;
   FeedName?: string;
   IsMandatory?: string | number | boolean;
+  isMandatory?: string | number | boolean;
   InputType?: string;
   GroupName?: string;
   Options?: { Option?: { Name?: string } | { Name?: string }[] } | "";
@@ -71,7 +72,7 @@ export function leerAtributos(body: unknown): AtributoCategoria[] {
   return comoLista(crudo).map((a) => ({
     nombre: String(a.FeedName || a.Name || "").trim(),
     etiqueta: String(a.Label || a.Name || a.FeedName || "").trim(),
-    obligatorio: a.IsMandatory === 1 || a.IsMandatory === "1" || a.IsMandatory === true,
+    obligatorio: [a.IsMandatory, a.isMandatory].some((v) => v === 1 || v === "1" || v === true || v === "true"),
     tipo: String(a.InputType ?? "texto"),
     opciones: a.Options && typeof a.Options === "object" ? comoLista(a.Options.Option).map((o) => String(o?.Name ?? "")).filter(Boolean) : [],
     esVariacion: String(a.GroupName ?? "").toLowerCase() === "variation",

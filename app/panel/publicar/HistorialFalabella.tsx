@@ -27,6 +27,9 @@ const ETIQUETA: Record<EstadoPublicacionFalabella, string> = {
   rechazado: "Rechazado por Falabella",
 };
 
+// Falabella devuelve los mensajes con entidades HTML (&#039;): se muestran legibles.
+const limpiar = (t: string) => t.replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+
 const pesos = (n: number) => `$${n.toLocaleString("es-CO")}`;
 
 const SEGUNDOS_ENTRE_CONSULTAS = 20;
@@ -114,7 +117,7 @@ export function HistorialFalabella({ publicaciones }: { publicaciones: Publicaci
                 ))}
               {p.errores.map((m) => (
                 <p key={m} style={{ fontSize: 12, margin: "2px 0", color: "var(--kpi-peligro-texto)" }}>
-                  {m}
+                  {limpiar(m)}
                 </p>
               ))}
 

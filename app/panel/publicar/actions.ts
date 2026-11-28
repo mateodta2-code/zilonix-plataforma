@@ -173,7 +173,8 @@ async function publicarEnMercadoLibre(
 
 // Datos generales (precio = el de Asana = precio de oferta, stock, SKU, fotos)
 // vienen del formulario; lo propio de Falabella (título ≤ 60, descripción,
-// marca real en Modelo, categoría, medidas reales opcionales) de sus campos.
+// marca real en Modelo, categoría, medidas reales opcionales) de sus campos;
+// título, descripción y portada son por cuenta, igual que en Mercado Libre.
 async function guardarBorradoresFalabella(formData: FormData, empresaId: string, usuarioId: string, cuentaIds: string[]): Promise<void> {
   const numero = (nombre: string) => {
     const v = String(formData.get(nombre) ?? "").trim();
@@ -185,19 +186,33 @@ async function guardarBorradoresFalabella(formData: FormData, empresaId: string,
     ...(numero("falabella_alto") && { alto: numero("falabella_alto") }),
     ...(numero("falabella_peso") && { peso: numero("falabella_peso") }),
   };
-  const entrada = {
-    sku: String(formData.get("sku") ?? ""),
-    titulo: String(formData.get("falabella_titulo") ?? ""),
-    descripcion: String(formData.get("falabella_descripcion") ?? ""),
-    modelo: String(formData.get("falabella_modelo") ?? ""),
-    precioOferta: Number(formData.get("precio") ?? 0),
-    stock: Number(formData.get("stock") ?? 1),
-    categoriaId: Number(formData.get("falabella_categoria") ?? 0),
-    imagenes: String(formData.get("imagenes") ?? "").split("\n"),
-    medidas,
-  };
-  const borrador = construirBorrador(entrada);
+  let atributos: Record<string, string> = {};
+  try {
+    const crudo = JSON.parse(String(formData.get("falabella_atributos") ?? "{}"));
+    if (crudo && typeof crudo === "object") {
+      for (const [k, v] of Object.entries(crudo)) if (typeof v === "string" && v.trim()) atributos[k] = v.trim();
+    }
+  } catch {
+    atributos = {};
+  }
+  const { Modelo: modelo = "", ...otrosAtributos } = atributos;
+  const galeria = String(formData.get("imagenes") ?? "").split("\n");
+  // Un borrador por cuenta: cada una tiene su título, descripción y portada
+  // (la portada va primero; el resto de la galería, informativa).
   for (const cuentaFalabellaId of cuentaIds) {
+    const portada = String(formData.get(`portada_${cuentaFalabellaId}`) ?? "").trim();
+    const borrador = construirBorrador({
+      sku: String(formData.get("sku") ?? ""),
+      titulo: String(formData.get(`titulo_${cuentaFalabellaId}`) ?? ""),
+      descripcion: String(formData.get(`descripcion_${cuentaFalabellaId}`) ?? ""),
+      modelo,
+      precioOferta: Number(formData.get("precio") ?? 0),
+      stock: Number(formData.get("stock") ?? 1),
+      categoriaId: Number(formData.get("falabella_categoria") ?? 0),
+      imagenes: portada ? [portada, ...galeria] : galeria,
+      medidas,
+      atributos: otrosAtributos,
+    });
     await guardarBorradorFalabella(empresaId, { cuentaFalabellaId, borrador, usuarioId });
   }
 }
