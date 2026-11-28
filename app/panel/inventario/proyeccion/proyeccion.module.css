@@ -1,0 +1,240 @@
+/* Proyección de inventarios — solo tokens que ya existen (globals.css):
+   mismo borde plata-azul, mismas tarjetas y chips que el resto de
+   Productos. Los colores de estado salen de los Chip y de --exito-texto
+   / --advertencia / --peligro-texto, así funcionan en claro y oscuro. */
+
+.selectorVentana {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 18px;
+  font-size: 13px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.ventana {
+  padding: 5px 12px;
+  border: 1px solid var(--borde-plata);
+  border-radius: var(--radio-chip);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--texto-zona-oscura);
+  transition: var(--transicion-color);
+}
+
+.ventana:hover {
+  border-color: var(--acento);
+}
+
+.ventana[data-activa="true"] {
+  border-color: var(--acento);
+  background: var(--acento-suave);
+  color: var(--acento-fuerte);
+}
+
+.ventana:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.seccion {
+  margin-top: 20px;
+}
+
+.tituloSeccion {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.nota {
+  margin: 10px 2px 0;
+  font-size: 12.5px;
+  color: var(--texto-suave-zona-oscura);
+}
+
+.producto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+}
+
+.codigo {
+  font-size: 12px;
+  color: var(--texto-suave);
+}
+
+.numero {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Barra de "cuánto me dura": llena hasta los días de cobertura (tope 90)
+   y una raya marca cuándo llega un pedido. Si el relleno no pasa la
+   raya, ya se va a acabar antes de que llegue lo que se pida hoy. */
+.barra {
+  position: relative;
+  height: 8px;
+  min-width: 140px;
+  border-radius: 4px;
+  background: var(--borde);
+}
+
+.barraRelleno {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--acento);
+}
+
+.barraRelleno[data-estado="comprar_ya"] {
+  background: var(--peligro-texto);
+}
+
+.barraRelleno[data-estado="pronto"] {
+  background: var(--advertencia);
+}
+
+.barraRelleno[data-estado="saludable"] {
+  background: var(--exito-texto);
+}
+
+.marcaEntrega {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 14px;
+  background: var(--texto);
+}
+
+.diasTexto {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tendencia {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tendencia[data-signo="sube"] {
+  color: var(--exito-texto);
+}
+
+.tendencia[data-signo="baja"] {
+  color: var(--peligro-texto);
+}
+
+.tendencia[data-signo="igual"] {
+  color: var(--texto-suave);
+}
+
+.celdaCalor {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.abc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--borde-plata);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.destacados {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .destacados {
+    grid-template-columns: 1fr;
+  }
+}
+
+.destacadoNombre {
+  margin: 4px 0 2px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* Plan de compra */
+.grupoPlan {
+  margin-bottom: 16px;
+}
+
+.cabeceraGrupo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.campoCantidad {
+  width: 96px;
+  text-align: right;
+}
+
+.razon {
+  max-width: 340px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.pieGrupo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* Reglas */
+.gridReglas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .gridReglas {
+    grid-template-columns: 1fr;
+  }
+}
+
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filaCampos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.formEntrega {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.campoChico {
+  width: 90px;
+}

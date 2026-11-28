@@ -407,6 +407,13 @@
       "when": 1795741837165,
       "tag": "0057_quick_justice",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795825079751,
+      "tag": "0058_pale_thunderbolt",
+      "breakpoints": true
     }
   ]
 }
