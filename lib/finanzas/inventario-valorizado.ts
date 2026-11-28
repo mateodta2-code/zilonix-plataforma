@@ -10,8 +10,12 @@
 // - Costo = resolverCostoSku (combo-sku.ts), la misma regla X2/X3 que
 //   usa la utilidad. Un SKU sin costo NO suma un valor inventado: queda
 //   "Falta costo" y se cuenta aparte.
-// - Ubicaciones: bodegas propias y de terceros (3PL) van juntas como
-//   "bodegas"; fulfillment_ml es "full". Falabella todavía no tiene stock
+// - Solo mercancía PROPIA: bodegas "propia" y Full (fulfillment_ml).
+//   Las bodegas tipo "tercero" («De un tercero» en Bodegas) guardan
+//   inventario que no es de la empresa y no suman a la inversión
+//   (pedido de Sharel, 2026-11-28). El stock en operadores 3PL vive en
+//   stock_bodega_3pl y esta pantalla no lo lee.
+// - Ubicaciones: bodegas propias = "bodegas"; fulfillment_ml = "full". Falabella todavía no tiene stock
 //   en la plataforma (el conector no lo trae): sin datos, nunca un 0.
 // - Mercancía en camino = pedido − recibido de las OC abiertas o
 //   parciales, al costo de la línea de la OC si existe, si no al de la
@@ -25,7 +29,7 @@ import { SITE_ID_DEFECTO, SITIOS_ML } from "@/lib/ml/sitios";
 
 export type Ubicacion = "bodegas" | "full" | "falabella";
 export const UBICACIONES: { valor: Ubicacion; etiqueta: string }[] = [
-  { valor: "bodegas", etiqueta: "Bodegas propias y 3PL" },
+  { valor: "bodegas", etiqueta: "Bodegas propias" },
   { valor: "full", etiqueta: "Full de Mercado Libre" },
   { valor: "falabella", etiqueta: "Fulfillment Falabella" },
 ];
@@ -91,6 +95,8 @@ export function valorizarStock(saldos: SaldoStock[], maestra: ReadonlyMap<string
     // Sin doble conteo: una reserva pasa unidades de disponible a
     // reservado (lib/inventario/calculos.ts, deltaDeMovimiento), así que
     // los dos números nunca comparten unidades.
+    // Inventario de terceros: no es plata de la empresa.
+    if (s.tipoBodega === "tercero") continue;
     const unidades = s.disponible + s.reservado;
     // Un saldo negativo no se oculta: va a la tabla y a un aviso, fuera
     // del total (la base lo impide con un CHECK; esto es la defensa si

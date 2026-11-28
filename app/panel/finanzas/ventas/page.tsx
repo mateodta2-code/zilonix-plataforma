@@ -1,6 +1,5 @@
 import { obtenerContextoPanel } from "@/lib/panel-contexto";
 import { requierePermiso, SinPermisoError } from "@/lib/permisos";
-import { BotonLink } from "@/components/marco/Boton";
 import { EncabezadoPagina } from "@/components/marco/EncabezadoPagina";
 import { SinAcceso } from "@/components/marco/SinAcceso";
 import { DetalleDiaCuentaProducto } from "@/components/finanzas/DetalleDiaCuentaProducto";
@@ -89,6 +88,7 @@ export default async function VentasUtilidadPage({ searchParams }: { searchParam
             extra={extra}
             acciones={puedeRecalcular ? <PanelRecalculoCostos /> : undefined}
             rangoMaximoDias={RANGO_MAXIMO_DIAS_FINANZAS}
+            mostrarFueraDeUtilidad
           />
         </section>
       )}
@@ -100,9 +100,6 @@ export default async function VentasUtilidadPage({ searchParams }: { searchParam
         </section>
       )}
 
-      <BotonLink href="/panel/finanzas" variante="fantasma" className={styles.volver}>
-        Volver a Finanzas
-      </BotonLink>
     </>
   );
 }

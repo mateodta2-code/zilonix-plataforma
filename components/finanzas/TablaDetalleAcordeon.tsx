@@ -26,8 +26,9 @@ type Props = {
   dias: DiaDetalle[];
   // pedido_id → número de orden de ML, solo de los pedidos de la página.
   pedidoIdExterno: Record<string, string>;
-  // Pedidos con reembolsos > 0.
-  conDevolucion: string[];
+  // Pedidos con reembolsos > 0. Finanzas → Ventas ya no los manda: desde
+  // el 28-nov las ventas con reembolso van a «Canceladas y devoluciones».
+  conDevolucion?: string[];
 };
 
 function diaMasNuevo(dias: DiaDetalle[]): string | null {
@@ -38,7 +39,7 @@ function plural(n: number, uno: string, varios: string): string {
   return n === 1 ? uno : varios;
 }
 
-export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExterno, conDevolucion }: Props) {
+export function TablaDetalleAcordeon({ encabezados, grupos, dias, pedidoIdExterno, conDevolucion = [] }: Props) {
   const [diasAbiertos, setDiasAbiertos] = useState<Set<string>>(() => {
     const nuevo = diaMasNuevo(dias);
     return new Set(nuevo === null ? [] : [nuevo]);

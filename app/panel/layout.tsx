@@ -91,9 +91,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       ...(vePromociones ? [{ etiqueta: "Promociones", href: "/panel/promociones", icono: "promociones" as const }] : []),
       // Finanzas se despliega como Productos, con sus secciones
       // filtradas por el mismo permiso que pide cada página
-      // (components/finanzas/secciones.ts).
+      // (components/finanzas/secciones.ts). Sin «Resumen», el link del
+      // menú contraído va directo a Ventas y utilidad.
       ...(veFinanzas
-        ? [{ etiqueta: "Finanzas", href: "/panel/finanzas", icono: "finanzas" as const, hijos: seccionesFinanzas(permisos) }]
+        ? [{ etiqueta: "Finanzas", href: "/panel/finanzas/ventas", icono: "finanzas" as const, hijos: seccionesFinanzas(permisos) }]
         : []),
       ...(vePublicidad ? [{ etiqueta: "Publicidad", href: "/panel/publicidad", icono: "publicidad" as const }] : []),
       ...(veActividad ? [{ etiqueta: "Actividad", href: "/panel/actividad", icono: "actividad" as const }] : []),
