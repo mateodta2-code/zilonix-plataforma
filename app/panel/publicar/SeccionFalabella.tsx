@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Boton } from "@/components/marco/Boton";
 import { Campo } from "@/components/marco/Campo";
 import { Tarjeta } from "@/components/marco/Tarjeta";
-import { atributosFalabellaAction, categoriasFalabellaAction } from "./falabella-actions";
+import { atributosFalabellaAction, categoriasFalabellaAction, recomendarCategoriaFalabellaAction } from "./falabella-actions";
 import type { AtributoCategoria } from "@/lib/falabella/catalogo";
+import { preseleccionarCategorias } from "@/lib/falabella/categorias-sugeridas";
 import { construirEan } from "@/lib/falabella/publicar-reglas";
 import styles from "./publicar.module.css";
 
@@ -18,10 +20,6 @@ const YA_CUBIERTOS = new Set([
 // «Características de la categoría» de Falabella (el equivalente al bloque de
 // Mercado Libre). Título, descripción y portada van en «Título, descripción y
 // portada por cuenta»; precio, stock, SKU y fotos, en «Datos generales».
-function sinTildes(t: string) {
-  return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
 export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; sku: string; titulo: string }) {
   const [categoria, setCategoria] = useState<{ id: number; ruta: string } | null>(null);
   const [lista, setLista] = useState<{ id: number; ruta: string }[] | null>(null);
@@ -58,25 +56,22 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
 
   // Sugerencias según el título (palabras del título que aparecen en la ruta
   // de la categoría). Evita elegir a ciegas una categoría que pide campos raros.
-  const sugeridas = useMemo(() => {
-    if (!lista) return [];
-    const palabras = sinTildes(titulo).split(/[^a-z0-9]+/).filter((w) => w.length >= 4).map((w) => w.replace(/(es|s)$/, ""));
-    if (palabras.length === 0) return [];
-    // Cada palabra pesa más cuanto más rara es entre las categorías (así «electrico»,
-    // que está en cientos, vale menos que «encendedor»), y pesa doble si cae en el nombre de la categoría final.
-    const rutas = lista.map((c) => sinTildes(c.ruta));
-    const peso = palabras.map((w) => Math.log(1 + lista.length / (1 + rutas.filter((r) => r.includes(w)).length)));
-    return lista
-      .map((c, i) => {
-        const hoja = sinTildes(c.ruta.split(" › ").pop() ?? "");
-        const puntos = palabras.reduce((t, w, k) => t + (rutas[i].includes(w) ? peso[k] * (hoja.includes(w) ? 2 : 1) : 0), 0);
-        return { c, puntos };
-      })
-      .filter((x) => x.puntos > 0)
-      .sort((a, b) => b.puntos - a.puntos || a.c.ruta.length - b.c.ruta.length)
-      .slice(0, 6)
-      .map((x) => x.c);
-  }, [lista, titulo]);
+  const sugeridas = useMemo(() => (lista ? preseleccionarCategorias(lista, titulo) : []), [lista, titulo]);
+  const [recomendadas, setRecomendadas] = useState<{ id: number; ruta: string }[] | null>(null);
+  const [conIA, setConIA] = useState(false);
+  const [recomendando, setRecomendando] = useState(false);
+
+  async function recomendar() {
+    setRecomendando(true);
+    setError(null);
+    const r = await recomendarCategoriaFalabellaAction(cuentaId, titulo);
+    setRecomendando(false);
+    if (r.ok) {
+      setRecomendadas(r.datos.categorias);
+      setConIA(r.datos.conIA);
+      if (r.datos.categorias.length === 0) setError("No encontré una categoría parecida al título. Búscala escribiendo una palabra.");
+    } else setError(r.error);
+  }
 
   async function elegir(c: { id: number; ruta: string }) {
     setCategoria(c);
@@ -161,10 +156,20 @@ export function SeccionFalabella({ cuentaId, sku, titulo }: { cuentaId: string; 
             disabled={cargando}
             onChange={(e) => setBusqueda(e.target.value)}
           />
-          {busqueda.trim().length < 2 && sugeridas.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <Boton type="button" variante="secundario" chico onClick={recomendar} disabled={recomendando || cargando || !titulo.trim()}>
+              {recomendando ? "Buscando…" : "Recomendar categoría según el título"}
+            </Boton>
+          </div>
+          {recomendadas && recomendadas.length > 0 && (
+            <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
+              {conIA ? "Recomendadas por la IA (de la más a la menos adecuada):" : "Parecidas al título (sin IA conectada para Publicaciones):"}
+            </p>
+          )}
+          {busqueda.trim().length < 2 && !recomendadas && sugeridas.length > 0 && (
             <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>Sugeridas según el título:</p>
           )}
-          {(busqueda.trim().length < 2 ? sugeridas : coincidencias).map((c) => (
+          {(busqueda.trim().length >= 2 ? coincidencias : recomendadas ?? sugeridas).map((c) => (
             <button key={c.id} type="button" className={styles.recuadroMarca} style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13, marginTop: 6 }} onClick={() => void elegir(c)}>
               {c.ruta}
             </button>
